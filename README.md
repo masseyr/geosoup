@@ -1,1 +1,1 @@
- Geospatial data manipulation in python
+ Geospatial data manipulation using GDAL in python
