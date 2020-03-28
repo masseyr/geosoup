@@ -13,5 +13,5 @@ from geosoup.vector import Vector
 from geosoup.logger import Logger
 
 
-__author__ = 'richard_massey'
+__author__ = 'richard massey'
 
