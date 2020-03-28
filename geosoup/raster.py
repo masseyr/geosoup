@@ -1329,59 +1329,8 @@ class MultiRaster:
         valid build vrt options in kwargs
         (from https://gdal.org/python/osgeo.gdal-module.html#BuildVRT):
 
-          options --- can be be an array of strings, a string or let empty and filled from other keywords..
-          resolution --- 'highest', 'lowest', 'average', 'user'.
-          outputBounds --- output bounds as (minX, minY, maxX, maxY) in target SRS.
-          xRes --- output horizontal resolution in target SRS.
-          yRes --- output vertical resolution in target SRS.
-          targetAlignedPixels --- whether to force output bounds to be multiple of output resolution.
-          separate --- whether each source file goes into a separate stacked band in the VRT band.
-          bandList --- array of band numbers (index start at 1).
-          addAlpha --- whether to add an alpha mask band to the VRT when the source raster have none.
-          resampleAlg --- resampling mode.
-          outputSRS --- assigned output SRS.
-          allowProjectionDifference --- whether to accept input datasets have not the same projection.
-           Note: they will *not* be reprojected.
-          srcNodata --- source nodata value(s).
-          VRTNodata --- nodata values at the VRT band level.
-          hideNodata --- whether to make the VRT band not report the NoData value.
-          callback --- callback method.
-          callback_data --- user data for callback.
-
         valid translate options in kwargs
         (from https://gdal.org/python/osgeo.gdal-module.html#TranslateOptions):
-
-          options --- can be be an array of strings, a string or let empty and filled from other keywords.
-          format --- output format ("GTiff", etc...)
-          outputType --- output type (gdal.GDT_Byte, etc...)
-          bandList --- array of band numbers (index start at 1)
-          maskBand --- mask band to generate or not ("none", "auto", "mask", 1, ...)
-          width --- width of the output raster in pixel
-          height --- height of the output raster in pixel
-          widthPct --- width of the output raster in percentage (100 = original width)
-          heightPct --- height of the output raster in percentage (100 = original height)
-          xRes --- output horizontal resolution
-          yRes --- output vertical resolution
-          creationOptions --- list of creation options
-          srcWin --- subwindow in pixels to extract: [left_x, top_y, width, height]
-          projWin --- subwindow in projected coordinates to extract: [ulx, uly, lrx, lry]
-          projWinSRS --- SRS in which projWin is expressed
-          strict --- strict mode
-          unscale --- unscale values with scale and offset metadata
-          scaleParams --- list of scale parameters, each of the form [src_min,src_max] or [src_min,src_max,dst_min,dst_max]
-          exponents --- list of exponentiation parameters
-          outputBounds --- assigned output bounds: [ulx, uly, lrx, lry]
-          metadataOptions --- list of metadata options
-          outputSRS --- assigned output SRS
-          GCPs --- list of GCPs
-          noData --- nodata value (or "none" to unset it)
-          rgbExpand --- Color palette expansion mode: "gray", "rgb", "rgba"
-          stats --- whether to calculate statistics
-          rat --- whether to write source RAT
-          resampleAlg --- resampling mode
-          callback --- callback method
-          callback_data --- user data for callback
-
         """
 
         if order is None:
