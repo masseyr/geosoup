@@ -4,12 +4,13 @@ import numpy as np
 from scipy import stats
 from math import sqrt
 from osgeo import gdal, gdal_array
-from geosoup.common import Handler, Opt
-from geosoup.raster import Raster
-from geosoup.timer import Timer
 from sklearn import linear_model
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
+from geosoup.common import Handler, Opt
+from geosoup.raster import Raster
+from geosoup.timer import Timer
+
 
 __all__ = ['HRFRegressor',
            'RFRegressor',
