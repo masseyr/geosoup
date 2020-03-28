@@ -9,3 +9,4 @@ Install using:
 `pip install geosoup`
 
 
+Note: Must have GDAL >= 2.2.3 up and running before installing this package.
