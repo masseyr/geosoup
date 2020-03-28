@@ -1,9 +1,8 @@
-earthengine-api==0.1.216
-future==0.18.2
-GDAL==3.0.4
-h5py==2.10.0
-numpy==1.18.2
-psutil==5.7.0
-scikit-learn==0.22.2.post1
-scipy==1.4.1
-six==1.14.0
+earthengine-api>=0.1.175
+future>=0.18.2
+GDAL>=2.2.3
+h5py>=2.10.0
+numpy>=1.16.5
+psutil>=5.6.2
+scikit-learn>=0.20.3
+scipy>=1.2.2
