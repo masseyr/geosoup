@@ -2,12 +2,18 @@ import logging
 
 
 class Logger(object):
+    """
+    Class for logging output
+    """
 
     def __init__(self,
                  name='default',
                  filename=None,
                  level='info',
                  stream=False):
+        """
+        Instantialize logger class object
+        """
 
         self.logger = logging.getLogger(name)
 
@@ -42,6 +48,9 @@ class Logger(object):
     def lprint(self,
                message_str=None,
                level='info'):
+        """
+        Method to print to logger
+        """
 
         if level.lower() == 'info':
             self.logger.info(message_str)
@@ -53,6 +62,9 @@ class Logger(object):
             self.logger.debug(message_str)
 
     def close(self):
+        """
+        Close logger
+        """
         handlers = self.logger.handlers[:]
         for handler in handlers:
             handler.close()
