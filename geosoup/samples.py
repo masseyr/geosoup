@@ -1,8 +1,8 @@
-import numpy as np
-from geosoup.common import Handler, Opt, Sublist
 import warnings
-from geosoup.timer import Timer
+import numpy as np
 from scipy.stats.stats import pearsonr
+from geosoup.timer import Timer
+from geosoup.common import Handler, Opt, Sublist
 
 
 __all__ = ['Samples']
