@@ -3,6 +3,7 @@ from scipy import stats, linalg
 from geosoup.common import Handler, Opt
 import warnings
 
+
 __all__ = ['Distance',
            'Mahalanobis',
            'Euclidean']
@@ -172,49 +173,35 @@ class Mahalanobis(Distance):
 
     def partial_corr(self):
         """
-        Partial Correlation in Python (clone of Matlab's partialcorr)
-        This uses the linear regression approach to compute the partial
-        correlation (might be slow for a huge number of variables). The
-        algorithm is detailed here:
-            http://en.wikipedia.org/wiki/Partial_correlation#Using_linear_regression
-        Taking X and Y two variables of interest and Z the matrix with all the variable minus {X, Y},
-        the algorithm can be summarized as
-            1) perform a normal linear least-squares regression with X as the target and Z as the predictor
-            2) calculate the residuals in Step #1
-            3) perform a normal linear least-squares regression with Y as the target and Z as the predictor
-            4) calculate the residuals in Step #3
-            5) calculate the correlation coefficient between the residuals from Steps #2 and #4;
-            The result is the partial correlation between X and Y while controlling for the effect of Z
-        Date: Nov 2014
-        Author: Fabian Pedregosa-Izquierdo, f@bianp.net
-        Testing: Valentina Borghesani, valentinaborghesani@gmail.com
-
-        Returns the sample linear partial correlation coefficients between pairs of variables in C, controlling
-        for the remaining variables in C :- Array with the different variables. Each column of C is taken as a variable.
-        P[i, j] contains the partial correlation of C[:, i] and C[:, j] controlling
-            for the remaining variables in C.
+        Partial Correlation using the linear regression approach to compute partial
+        correlation among variables
+        :returns Sample linear partial correlation coefficients between pairs of variables in self.matrix
+        [i, j] contains the partial correlation of self.matrix[:, i] and self.matrix[:, j]
         """
 
-        C = np.asarray(self.matrix)
-        p = C.shape[1]
-        P_corr = np.zeros((p, p), dtype=np.float)
-        for i in range(p):
-            P_corr[i, i] = 1
-            for j in range(i + 1, p):
-                idx = np.ones(p, dtype=np.bool)
-                idx[i] = False
-                idx[j] = False
-                beta_i = linalg.lstsq(C[:, idx], C[:, j])[0]
-                beta_j = linalg.lstsq(C[:, idx], C[:, i])[0]
+        var_data = np.asarray(self.matrix)
+        n_var = var_data.shape[1]
+        part_corr = np.zeros((n_var, n_var), dtype=np.float)
 
-                res_j = C[:, j] - C[:, idx].dot(beta_i)
-                res_i = C[:, i] - C[:, idx].dot(beta_j)
+        for var_indx in range(0, n_var):
+            part_corr[var_indx, var_indx] = 1
 
-                corr = stats.pearsonr(res_i, res_j)[0]
-                P_corr[i, j] = corr
-                P_corr[j, i] = corr
+            for comparison_var_indx in range(var_indx + 1, n_var):
 
-        return P_corr
+                indices = np.ones(n_var, dtype=np.bool)
+                indices[var_indx] = False
+                indices[comparison_var_indx] = False
+
+                beta_var = linalg.lstsq(var_data[:, indices], var_data[:, comparison_var_indx])[0]
+                beta_comparison_var = linalg.lstsq(var_data[:, indices], var_data[:, var_indx])[0]
+
+                result_var = var_data[:, comparison_var_indx] - var_data[:, indices].dot(beta_var)
+                result_comparison_var = var_data[:, var_indx] - var_data[:, indices].dot(beta_comparison_var)
+
+                correlation = stats.pearsonr(result_var, result_comparison_var)[0]
+                part_corr[var_indx, comparison_var_indx] = part_corr[comparison_var_indx, var_indx] = correlation
+
+        return part_corr
 
 
 class Euclidean(object):
@@ -362,6 +349,7 @@ class Euclidean(object):
         """
         method to remove points based on proximity threshold
         :param thresh: proximity threshold (default: 90th percentile)
+        :param verbose: If steps should be displayed
         :return: None
         """
         if verbose:
@@ -380,7 +368,8 @@ class Euclidean(object):
             Opt.cprint('Min group size : {} '.format(str(n_proxim.min())))
 
         # sort the indices in increasing order of n_proxim
-        idx = np.argsort(n_proxim).tolist()
+        idx = []
+        idx += np.argsort(n_proxim).tolist()
         idx_out = list()
 
         # find indices of elements that should be removed
