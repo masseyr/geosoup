@@ -353,47 +353,15 @@ class Sublist(list):
                 out_list += list(list_dicts[jj] for jj in out_indices.tolist())
 
             return out_list
-    '''
-    @staticmethod
-    def moving_average(arr,
-                       n=3):
-        """
-        Method to smooth an array of numbers using moving array method
-        :param arr: Input array
-        :param n: Number of elements to consider for moving average (default: 3)
-        :return: smoothed array
-        """
-        if type(arr) in (list, tuple, dict, set):
-            arr_copy = np.array(list(Opt.__copy__(arr)))
-        elif type(arr) == np.ndarray:
-            arr_copy = arr.copy()
-        else:
-            raise ValueError("Input array type not understood")
-
-        if n < 1:
-            n = 1
-
-        ret = np.cumsum(arr_copy,
-                        dtype=np.float32)
-
-        ret[n:] = ret[n:] - ret[:-n]
-        tail = (n - 1) / 2 if (n % 2 == 1) else n / 2
-
-        if tail == 0:
-            out_arr = arr_copy
-        else:
-            out_arr = np.concatenate([np.array(arr_copy)[0:tail], ret[n - 1:] / n, np.array(arr_copy[-tail:])])
-
-        if type(arr) in (list, tuple, dict, set):
-            return out_arr.tolist()
-        else:
-            return out_arr
-    '''
 
     @staticmethod
     def calc_parabola_param(pt1, pt2, pt3):
         """
         define a parabola using three points
+        :param pt1: First point (x,y)
+        :param pt2: Second point (x,y)
+        :param pt3: Third point (x,y)
+        :return tuple of a, b, and c for parabola a(x^2) + b*x + c = 0
         """
         x1, y1 = pt1
         x2, y2 = pt2
@@ -440,7 +408,7 @@ class Sublist(list):
 
         for ker_size in ker_list:
             if ker_size > 1:
-                tail = (ker_size - 1) / 2
+                tail = int((ker_size - 1) / 2)
 
                 ret = np.cumsum(np.concatenate([arr_copy[0:tail],
                                                 arr_copy,
@@ -699,7 +667,7 @@ class Handler(object):
 
         if len(components) >= 2:
             return self.dirname + self.sep + '.'.join(components[0:-1]) + \
-                      string + '.' + components[-1]
+                      string + '.' + str(components[-1])
         else:
             return self.basename + self.sep + components[0] + string
 
@@ -786,13 +754,13 @@ class Handler(object):
             bufgen = takewhile(lambda x: x, (f.read(bufsize) for _ in repeat(None)))
 
             if nlines:
-                val = sum(buf.count(b'\n') for buf in bufgen if buf)
+                val = sum(buf.count('\n') for buf in bufgen if buf)
             else:
                 val = list()
                 remaining = ''
                 for buf in bufgen:
                     if buf:
-                        temp_lines = (remaining + buf).split(b'\n')
+                        temp_lines = (remaining + buf).split('\n')
                         if len(temp_lines) <= 1:
                             remaining += ''.join(temp_lines)
                         else:
@@ -1065,7 +1033,8 @@ class Handler(object):
             if header is not None:
                 header = delim + header
 
-        np_list = np_array.tolist()
+        np_list = []
+        np_list += np_array.tolist()
         np_list = list(delim.join(list(str(elem) for elem in row_list))
                        for row_list in np_list)
         if header is not None:
