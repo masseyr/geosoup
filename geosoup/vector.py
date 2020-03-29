@@ -978,24 +978,6 @@ class Vector(object):
 
             return temp_vector
 
-    def merge(self):
-        pass
-
-    def union(self,
-              feature,
-              **kwargs):
-        pass
-
-    @staticmethod
-    def intersect(features,
-                  **kwargs):
-        pass
-
-    def clip(self,
-             feature,
-             **kwargs):
-        pass
-
     @classmethod
     def vector_from_string(cls,
                            geom_strings,
