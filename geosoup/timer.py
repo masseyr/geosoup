@@ -1,4 +1,5 @@
 import time
+import sys
 from functools import wraps
 
 
@@ -112,8 +113,7 @@ class Timer:
                     # time to run
                     t = Timer.display_time(t2 - t1)
 
-                    print("Time it took to run {}: {}\n".format(func.__name__,
-                                                                t))
+                    sys.stdout.write("Time it took to run {}: {}\n".format(func.__name__, t))
                     return val
                 else:
                     return func(*args, **kwargs)
