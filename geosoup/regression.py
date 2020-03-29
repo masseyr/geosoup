@@ -434,12 +434,12 @@ class _Regressor(object):
 
                 # file to write the model run output to
                 outfile = pickle_dir + sep + \
-                          Handler(in_file).basename.split('.')[0] + name + '.txt'
+                    Handler(in_file).basename.split('.')[0] + name + '.txt'
                 outfile = Handler(filename=outfile).file_remove_check()
 
                 # save RF classifier using pickle
                 picklefile = pickle_dir + sep + \
-                             Handler(in_file).basename.split('.')[0] + name + '.pickle'
+                    Handler(in_file).basename.split('.')[0] + name + '.pickle'
                 picklefile = Handler(filename=picklefile).file_remove_check()
 
                 # predict using the model to store results in a file
@@ -655,8 +655,10 @@ class MRegressor(_Regressor):
         # then write to file and proceed to return
         elif outfile is not None:
             # write y, y_hat_bar, var_y to file (<- rows in this order)
+            y_list = []
+            y_list += y.tolist()
             out_list = ['obs_y,' + ', '.join([str(elem) for elem in data['labels'].tolist()]),
-                        'pred_y,' + ', '.join([str(elem) for elem in y.tolist()]),
+                        'pred_y,' + ', '.join([str(elem) for elem in y_list]),
                         'rmse,' + str(rmse),
                         'rsq,' + str(lm['rsq']),
                         'slope,' + str(lm['slope']),
