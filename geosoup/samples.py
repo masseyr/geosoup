@@ -28,6 +28,8 @@ class Samples:
                  weights=None,
                  weights_colname=None,
                  use_band_dict=None,
+                 max_allow_x=1e13,
+                 max_allow_y=1e13,
                  **kwargs):
 
         """
@@ -38,6 +40,8 @@ class Samples:
         :param x_name: 1d array of feature names (bands)
         :param y_name: name of label
         :param use_band_dict: list of attribute (band) names
+        :param max_allow_x: Maximum allowed values of x
+        :param max_allow_y: Maximum allowed value of y
         """
         self.csv_file = csv_file
         self.label_colname = label_colname
@@ -67,6 +71,9 @@ class Samples:
         self.xmax = None
         self.ymin = None
         self.ymax = None
+
+        self.max_allow_x = max_allow_x
+        self.max_allow_y = max_allow_y
 
         # either of label name or csv file is provided without the other
         if (csv_file is None) and (label_colname is None):
@@ -164,8 +171,8 @@ class Samples:
 
             self.nfeat = self.x.shape[1]
 
-            self.xmin = self.x.min(0)
-            self.xmax = self.x.max(0)
+            self.xmin = self.x.min(0, initial=max_allow_x)
+            self.xmax = self.x.max(0, initial=max_allow_y)
 
             self.index = np.arange(0, self.x.shape[0])
 
@@ -174,8 +181,8 @@ class Samples:
             self.nvar = 0
 
         if self.y is not None:
-            self.ymin = self.y.min()
-            self.ymax = self.y.max()
+            self.ymin = self.y.min(initial=-max_allow_y)
+            self.ymax = self.y.max(initial=max_allow_y)
 
         if self.y is not None:
             self.head = '\n'.join(list(str(elem) for elem in
@@ -207,8 +214,10 @@ class Samples:
         :return: dictionary of features and labels
         """
         if self.columns is not None:
+            column_list = []
+            column_list += self.columns.tolist()
             out_x = self.x[:, self.columns]
-            out_x_name = Sublist(self.x_name[i] for i in self.columns.tolist())
+            out_x_name = Sublist(self.x_name[i] for i in column_list)
         else:
             out_x = self.x
             out_x_name = self.x_name
@@ -267,10 +276,10 @@ class Samples:
         self.y = np.hstack((self.y, samp.y))
         self.nsamp = self.x.shape[0]
         self.index = np.arange(0, self.nsamp)
-        self.xmin = self.x.min(0)
-        self.xmax = self.x.max(0)
-        self.ymin = self.y.min()
-        self.ymax = self.y.max()
+        self.xmin = self.x.min(0, initial=-self.max_allow_x)
+        self.xmax = self.x.max(0, initial=self.max_allow_x)
+        self.ymin = self.y.min(initial=-self.max_allow_y)
+        self.ymax = self.y.max(initial=self.max_allow_y)
 
     @Timer.timing(True)
     def delete_column(self,
@@ -397,10 +406,10 @@ class Samples:
         trn_samp.index = np.arange(0, trn_samp.nsamp)
         trn_samp.nfeat = trn_samp.x.shape[1]
 
-        trn_samp.xmin = trn_samp.x.min(0)
-        trn_samp.xmax = trn_samp.x.max(0)
-        trn_samp.ymin = trn_samp.y.min()
-        trn_samp.ymax = trn_samp.y.max()
+        trn_samp.xmin = trn_samp.x.min(0, initial=-self.max_allow_x)
+        trn_samp.xmax = trn_samp.x.max(0, initial=self.max_allow_x)
+        trn_samp.ymin = trn_samp.y.min(initial=-self.max_allow_y)
+        trn_samp.ymax = trn_samp.y.max(initial=self.max_allow_y)
 
         # validation sample object
         val_samp = Samples()
@@ -412,10 +421,10 @@ class Samples:
         val_samp.index = np.arange(0, val_samp.nsamp)
         val_samp.nfeat = val_samp.x.shape[1]
 
-        val_samp.xmin = val_samp.x.min(0)
-        val_samp.xmax = val_samp.x.max(0)
-        val_samp.ymin = val_samp.y.min()
-        val_samp.ymax = val_samp.y.max()
+        val_samp.xmin = val_samp.x.min(0, initial=-self.max_allow_x)
+        val_samp.xmax = val_samp.x.max(0, initial=self.max_allow_x)
+        val_samp.ymin = val_samp.y.min(initial=-self.max_allow_y)
+        val_samp.ymax = val_samp.y.max(initial=self.max_allow_y)
 
         return trn_samp, val_samp
 
@@ -447,11 +456,11 @@ class Samples:
         ran_samp.nfeat = self.x.shape[1]
         ran_samp.index = np.arange(0, ran_samp.nsamp)
 
-        ran_samp.xmin = self.x.min(0)
-        ran_samp.xmax = self.x.max(0)
+        ran_samp.xmin = self.x.min(0, initial=-self.max_allow_x)
+        ran_samp.xmax = self.x.max(0, initial=self.max_allow_x)
 
-        ran_samp.ymin = self.y.min()
-        ran_samp.ymax = self.y.max()
+        ran_samp.ymin = self.y.min(initial=-self.max_allow_y)
+        ran_samp.ymax = self.y.max(initial=self.max_allow_y)
 
         return ran_samp
 
@@ -474,11 +483,11 @@ class Samples:
         samp.nfeat = self.x.shape[1]
         samp.index = np.arange(0, samp.nsamp)
 
-        samp.xmin = self.x.min(0)
-        samp.xmax = self.x.max(0)
+        samp.xmin = self.x.min(0, initial=-self.max_allow_x)
+        samp.xmax = self.x.max(0, initial=self.max_allow_x)
 
-        samp.ymin = self.y.min()
-        samp.ymax = self.y.max()
+        samp.ymin = self.y.min(initial=-self.max_allow_y)
+        samp.ymax = self.y.max(initial=self.max_allow_y)
 
         return samp
 
