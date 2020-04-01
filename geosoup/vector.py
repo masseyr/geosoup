@@ -1284,6 +1284,9 @@ class Vector(object):
             creation_options.update({'attribute': attribute})
         creation_options.update({'all_touched': all_touched})
 
+        creation_list = ['{}={}'.format(str(k).upper(), str(v).upper())
+                         for k, v in creation_options.items()]
+
         for band in bands:
             band = target_ds.GetRasterBand(band)
             band.SetNoDataValue(nodatavalue)
