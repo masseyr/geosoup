@@ -1638,3 +1638,137 @@ class MultiRaster:
             Opt.cprint('Written {}'.format(outfile))
         else:
             return lras
+
+
+        def mosaic(self,
+                   order=None,
+                   verbose=False,
+                   outfile=None,
+                   nodata_values=None,
+                   band_index=None,
+                   blend_images=True,
+                   blend_pixels=10,
+                   blend_cutline=None,
+                   **kwargs):
+            """
+            Under construction
+
+            Method to mosaic rasters in a given order
+            :param order: order of raster layerstack
+            :param verbose: If some of the steps should be printed to console
+            :param outfile: Name of the output file (.tif)
+            :param nodata_values: Value or tuple (or list) of values used as nodata bands for each image to be mosaicked
+            :param band_index: list of bands to be used in mosaic (default: all)
+            :param blend_images: If blending should be used in mosaicking (default True)
+            :param blend_cutline: OSGEO SWIG geometry of cutline
+            :param blend_pixels: width of pixels to blend around the cutline or
+                                 raster boundary for multiple rasters (default: 10)
+
+            :return: None
+
+            valid warp options in kwargs
+            (from https://gdal.org/python/osgeo.gdal-module.html#WarpOptions):
+
+              options --- can be be an array of strings, a string or let empty and filled from other keywords.
+              format --- output format ("GTiff", etc...)
+              outputBounds --- output bounds as (minX, minY, maxX, maxY) in target SRS
+              outputBoundsSRS --- SRS in which output bounds are expressed, in the case they are not expressed in dstSRS
+              xRes, yRes --- output resolution in target SRS
+              targetAlignedPixels --- whether to force output bounds to be multiple of output resolution
+              width --- width of the output raster in pixel
+              height --- height of the output raster in pixel
+              srcSRS --- source SRS
+              dstSRS --- output SRS
+              srcAlpha --- whether to force the last band of the input dataset to be considered as an alpha band
+              dstAlpha --- whether to force the creation of an output alpha band
+              outputType --- output type (gdal.GDT_Byte, etc...)
+              workingType --- working type (gdal.GDT_Byte, etc...)
+              warpOptions --- list of warping options
+              errorThreshold --- error threshold for approximation transformer (in pixels)
+              warpMemoryLimit --- size of working buffer in bytes
+              resampleAlg --- resampling mode
+              creationOptions --- list of creation options
+              srcNodata --- source nodata value(s)
+              dstNodata --- output nodata value(s)
+              multithread --- whether to multithread computation and I/O operations
+              tps --- whether to use Thin Plate Spline GCP transformer
+              rpc --- whether to use RPC transformer
+              geoloc --- whether to use GeoLocation array transformer
+              polynomialOrder --- order of polynomial GCP interpolation
+              transformerOptions --- list of transformer options
+              cutlineDSName --- cutline dataset name
+              cutlineLayer --- cutline layer name
+              cutlineWhere --- cutline WHERE clause
+              cutlineSQL --- cutline SQL statement
+              cutlineBlend --- cutline blend distance in pixels
+              cropToCutline --- whether to use cutline extent for output bounds
+              copyMetadata --- whether to copy source metadata
+              metadataConflictValue --- metadata data conflict value
+              setColorInterpretation --- whether to force color interpretation of input bands to output bands
+              callback --- callback method
+              callback_data --- user data for callback
+
+            For valid translate options, see MultiRaster.layerstack()
+
+
+            steps:
+            1) vectorize each layer in blend_layers according to vectorize_values
+            2) calculate buffer in 1 pixel step from vectorized shapes
+            3) Only two images at a time, the one on top and the once below it, are weighted, and weighted function calculated
+            4) calculate weighting function output using vrt via tiling
+
+
+            if vectorize_values is None:
+                vectorize_values = list(self.nodatavalue[i-1] for i in blend_bands)
+
+            elif type(vectorize_values) not in (list, tuple):
+                if type(vectorize_values) != np.ndarray:
+                    vectorize_values = list(vectorize_values for _ in blend_bands)
+                else:
+                    raise ValueError('Values to vectorize should be one of: tuple, list, int, or float')
+
+            vector_list = list()
+            for ii, val in enumerate(vectorize_values):
+                temp_vec =
+
+            """
+            pass
+
+
+class Terrain(Raster):
+    """Under construction"""
+
+    def __init__(self,
+                 name,
+                 array=None,
+                 bnames=None,
+                 metadict=None,
+                 dtype=None,
+                 shape=None,
+                 transform=None,
+                 crs_string=None):
+        """Under construction"""
+        super(Terrain, self).__init__(name,
+                                      array,
+                                      bnames,
+                                      metadict,
+                                      dtype,
+                                      shape,
+                                      transform,
+                                      crs_string)
+
+    def slope(self):
+        """Under construction"""
+        pass
+
+    def aspect(self):
+        """Under construction"""
+        pass
+
+    def concavity(self):
+        """Under construction"""
+        pass
+
+    def max_slope(self):
+        """Under construction"""
+        pass
