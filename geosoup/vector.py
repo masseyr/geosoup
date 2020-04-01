@@ -1329,3 +1329,4 @@ class Vector(object):
              **kwargs):
         """Under construction"""
         pass
+    
