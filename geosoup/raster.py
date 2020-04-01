@@ -610,11 +610,10 @@ class Raster(object):
                    pixel_size,
                    tie_point,
                    pixel_center=True):
-
         """
         Method to convert pixel locations to image coords
         :param xy_list: List of tuples [(x1,y1), (x2,y2)....]
-        :param pixel_size: tuple of x and y pixel size
+        :param pixel_size: tuple of x and y pixel size. The signs of the pixel sizes (+/-) are as in GeoTransform
         :param tie_point: tuple of x an y coordinates of tie point for the xy list
         :param pixel_center: If the center of the pixels should be returned instead of the top corners (default: True)
         :return: List of coordinates in tie point coordinate system
@@ -933,7 +932,7 @@ class Raster(object):
                      band_order=None,
                      **kwargs):
         """
-        Extract all pixels that intersect a feature in a Raster.
+        Extract all pixels that intersect a geometry or a list of geometries in a Raster.
         The raster object should be initialized before using this method.
         Currently this method only supports single geometries per query.
         :param wkt_strings: List or Tuple of Vector geometries (e.g. point) in WKT string format
@@ -941,14 +940,30 @@ class Raster(object):
                            Currently only 'Point' or 'MultiPoint' geometry is supported.
                            Accepted wkt_strings: List of POINT or MULTIPOINT wkt(s)
         :param geom_id: List of geometry IDs
-                        If for a MultiGeom only one ID is presented, it will be suffixed with a number
-        :param band_order: Order of bands to be extracted (list)
+                        If for a MultiGeom only one ID is presented,
+                        it will be suffixed with the order of the geometry part
+        :param band_order: Order of bands to be extracted (list of band indices)  default: all bands
 
         :param kwargs: List of additional arguments
-                        tile_size : (256, 256) default
+                        tile_size : tuple (256, 256) default
+                                    Size of internal tiling
+                        multi_geom_separate: bool (False) default
+                                            if multi geometries should be separated or not
+                        pass_pixel_coords: bool (False) default
+                                           if coordinates of the pixels should be passed along the output
+                        pixel_center: bool (True) default
+                                     Used only if the pass_pixel_coords flag is set to true.
+                                     Returns the pixel centers of each pixel if set as true
+                                     else returns top left corners
+                        reducer: Valid keywords: 'mean','median','max',
+                                                 'min', 'percentile_xx' where xx is percentile from 1-99
 
-        :return: List of pixel band values as tuples for each pixel : [ (ID, [band vales] ), ]
+        :return: Dictionary of dictionaries
+                {internal_id: {'values': [[band1, ], ], 'coordinates': [(x1, y1), ]}, }
+                if geom_id is supplied then internal_id is the supplied geom_id
         """
+        if band_order is None:
+            band_order = list(range(self.shape[0]))
 
         # define tile size
         if 'tile_size' in kwargs:
@@ -956,73 +971,205 @@ class Raster(object):
         else:
             tile_size = (self.shape[1], self.shape[2])
 
+        # if multi geometries should be separated or not
+        if 'multi_geom_separate' in kwargs:
+            multi_geom_separate = kwargs['multi_geom_separate']
+        else:
+            multi_geom_separate = False
+
+        if 'pass_pixel_coords' in kwargs:
+            pass_pixel_coords = kwargs['pass_pixel_coords']
+        else:
+            pass_pixel_coords = False
+
+        if 'pixel_center' in kwargs:
+            pixel_center = kwargs['pixel_center']
+        else:
+            pixel_center = True
+
+        if 'reducer' in kwargs:
+            reducer = kwargs['reducer']
+        else:
+            reducer = None
+
         # define band order
         if band_order is None:
-            band_order = np.array(range(0, self.shape[0]))
-        else:
-            band_order = np.array(band_order)
+            band_order = list(range(0, self.shape[0]))
 
         # initialize raster
         if not self.init or self.array is None:
             self.initialize()
 
+        # make wkt strings into a list
         if type(wkt_strings) not in (list, tuple):
             wkt_strings = [wkt_strings]
 
-        id_geom_list = list()
-        if geom_id is None:
-            geom_id = range(1, len(wkt_strings) + 1)
+        # list of geometry indices and OGR SWIG geometry objects
+        # each dict entry contains   internal_id : (geom_id, geom)
+        id_geom_dict = dict()
+        geom_types = []
 
-        for wkt_str_counter, wkt_string in enumerate(wkt_strings):
-            if 'MULTI' in wkt_string:
-                multi_geom = ogr.CreateGeometryFromWkt(wkt_strings)
-                id_geom_list += list(('{}_{}'.format(geom_id[wkt_str_counter], str(jj+1)),
-                                      multi_geom.GetGeometryRef(jj))
-                                     for jj in range(multi_geom.GetGeometryCount()))
+        for wkt_string_indx, wkt_string in enumerate(range(len(wkt_strings))):
+            # multi geometry should be separated
+            if multi_geom_separate:
+                if ('MULTI' in wkt_string) or ('multi' in wkt_string):
+
+                    # if multi geometry should be separated then add M prefix to index and
+                    # add another index of the geometry after underscore
+                    multi_geom = ogr.CreateGeometryFromWkt(wkt_string)
+
+                    for multi_geom_indx in range(multi_geom.GetGeometryCount()):
+                        geom_internal_id = '{}_{}'.format(str(wkt_string_indx), str(multi_geom_indx))\
+                            if geom_id is None else '{}_{}'.format(str(geom_id[wkt_string_indx]),
+                                                                   str(multi_geom_indx))
+                        id_geom_dict[geom_internal_id] = multi_geom.GetGeometryRef(multi_geom_indx)
+
+                else:
+                    # if no multi geometry in the string
+                    id_geom_dict[str(wkt_string_indx) if geom_id is None else geom_id[wkt_string_indx]] = \
+                        ogr.CreateGeometryFromWkt(wkt_string)
+
             else:
-                id_geom_list.append(('{}_{}'.format(geom_id[wkt_str_counter], str(1)),
-                                     ogr.CreateGeometryFromWkt(wkt_string)))
+                # if multi geometry should not be separated
+                id_geom_dict[str(wkt_string_indx) if geom_id is None else geom_id[wkt_string_indx]] = \
+                    ogr.CreateGeometryFromWkt(wkt_string)
 
+        # make internal tiles
         self.make_tile_grid(*tile_size)
 
-        tile_samp_output = list([] for _ in range(len(id_geom_list)))
+        # prepare dict struct
+        out_geom_extract = dict()
+        for internal_id, _ in id_geom_dict.items():
+            out_geom_extract[internal_id] = {'values': [], 'coordinates': []}
 
+        # list of sample ids
         for tile in self.tile_grid:
-            tile_wkt = 'POLYGON(({}))'.format(', '.join(list(' '.join([str(x), str(y)])
-                                                             for (x, y) in tile['bound_coords'])))
-            tile_geom = ogr.CreateGeometryFromWkt(tile_wkt)
 
-            samp_ids = list(ii for ii, elem in enumerate(id_geom_list) if tile_geom.Intersects(elem[1]))
+            # create tile geometry from bounds
+            tile_geom = ogr.CreateGeometryFromWkt('POLYGON(({}))'.format(', '.join(list(' '.join([str(x), str(y)])
+                                                                                        for (x, y)
+                                                                                        in tile['bound_coords']))))
 
-            if len(samp_ids) > 0:
-                self.read_array(tile['block_coords'])
+            tile_arr = self.get_tile(block_coords=tile['block_coords'])
 
-                samp_coords = list(list(float(elem)
-                                        for elem in id_geom_list[ii][1].ExportToWkt()
-                                        .replace('POINT', '')
-                                        .replace('(', '')
-                                        .replace(')', '')
-                                        .strip()
-                                        .split(' '))
-                                   for ii in samp_ids)
+            # check if the geometry intersects and
+            # place all same geometry types together
+            geom_by_type = {}
+            for samp_id, samp_geom in id_geom_dict.items():
+                if tile_geom.Intersects(samp_geom):
+                    geom_type = samp_geom.GetGeometryType()
+                    if geom_type not in geom_by_type:
+                        geom_by_type[geom_type] = [(samp_id, samp_geom)]
+                    else:
+                        geom_by_type[geom_type].append((samp_id, samp_geom))
 
-                if self.shape[0] == 1:
-                    samp_values = list([self.array[int(y), int(x)]]
-                                       for x, y in self.get_locations(samp_coords,
-                                                                      (self.transform[1],
-                                                                       self.transform[5]),
-                                                                      tile['tie_point']))
-                else:
-                    samp_values = list(self.array[band_order, int(y), int(x)].tolist()
-                                       for x, y in self.get_locations(samp_coords,
-                                                                      (self.transform[1],
-                                                                       self.transform[5]),
-                                                                      tile['tie_point']))
+            # check is any geoms are available
+            if len(geom_by_type) > 0:
+                for geom_type, geom_list in geom_by_type.items():
 
-                for id_counter, samp_id in enumerate(samp_ids):
-                    tile_samp_output[samp_id] = (id_geom_list[samp_id][0], samp_values[id_counter])
+                    # get tile shape and tie point
+                    _, _, rows, cols = tile['block_coords']
+                    tie_pt_x, tie_pt_y = tile['tie_point']
 
-        return tile_samp_output
+                    # create tile empty raster in memory
+                    target_ds = gdal.GetDriverByName('MEM').Create('tmp',
+                                                                   cols,
+                                                                   rows,
+                                                                   1,
+                                                                   gdal.GDT_UInt16)
+
+                    # set pixel size and tie point
+                    target_ds.SetGeoTransform((tie_pt_x,
+                                               self.transform[1],
+                                               0,
+                                               tie_pt_y,
+                                               0,
+                                               self.transform[5]))
+
+                    # set raster projection
+                    target_ds.SetProjection(self.crs_string)
+
+                    # create vector in memory
+                    burn_driver = ogr.GetDriverByName('Memory')
+                    burn_datasource = burn_driver.CreateDataSource('mem_source')
+                    burn_spref = osr.SpatialReference()
+                    burn_spref.ImportFromWkt(self.crs_string)
+                    burn_layer = burn_datasource.CreateLayer('tmp_lyr',
+                                                             srs=burn_spref,
+                                                             geom_type=geom_type)
+
+                    # attributes
+                    fielddefn = ogr.FieldDefn('fid', ogr.OFTInteger)
+                    result = burn_layer.CreateField(fielddefn)
+                    layerdef = burn_layer.GetLayerDefn()
+
+                    geom_burn_val = 0
+                    geom_dict = {}
+                    for geom_id, geom in geom_list:
+                        # create features in layer
+                        temp_feature = ogr.Feature(layerdef)
+                        temp_feature.SetGeometry(geom)
+                        temp_feature.SetField('fid', geom_burn_val)
+                        burn_layer.CreateFeature(temp_feature)
+                        geom_dict[geom_burn_val] = geom_id
+                        geom_burn_val += 1
+
+                    gdal.RasterizeLayer(target_ds,
+                                        [1],
+                                        burn_layer,
+                                        None,  # transformer
+                                        None,  # transform
+                                        [1],
+                                        ['ALL_TOUCHED=TRUE',
+                                         'ATTRIBUTE=FID'])
+
+                    # read mask band as array
+                    temp_band = target_ds.GetRasterBand(1)
+                    mask_arr = temp_band.ReadAsArray()
+
+                    for geom_burn_val, geom_id in geom_dict.items():
+
+                        # make list of unmasked pixels
+                        pixel_xy_loc = list([y, x] for y, x in np.transpose(np.where(mask_arr == geom_burn_val)))
+
+                        if pass_pixel_coords:
+                            # get coordinates
+                            out_geom_extract[geom_id]['coordinates'] += self.get_coords(pixel_xy_loc,
+                                                                                        (self.transform[1],
+                                                                                         self.transform[5]),
+                                                                                        tile['tie_point'],
+                                                                                        pixel_center)
+
+                        # get band values from tile array
+                        out_geom_extract[geom_id]['values'] += list(tile_arr[band_order, x, y].tolist()
+                                                                    for x, y in pixel_xy_loc)
+            warned = False
+            if reducer is not None:
+                for geom_id, geom_dict in out_geom_extract.items():
+                    if reducer == 'mean':
+                        geom_dict['values'] = np.mean(geom_dict['values'], axis=0).tolist()
+                        geom_dict['coordinates'] = np.mean(geom_dict['coordinates'], axis=0).tolist()
+                    elif reducer == 'median':
+                        geom_dict['values'] = np.median(geom_dict['values'], axis=0).tolist()
+                        geom_dict['coordinates'] = np.median(geom_dict['coordinates'], axis=0).tolist()
+                    elif reducer == 'min':
+                        geom_dict['values'] = np.min(geom_dict['values'], axis=0).tolist()
+                        geom_dict['coordinates'] = np.min(geom_dict['coordinates'], axis=0).tolist()
+                    elif reducer == 'max':
+                        geom_dict['values'] = np.max(geom_dict['values'], axis=0).tolist()
+                        geom_dict['coordinates'] = np.max(geom_dict['coordinates'], axis=0).tolist()
+                    elif 'percentile' in reducer:
+                        pctl = int(reducer.split('_')[1])
+                        geom_dict['values'] = np.percentile(geom_dict['values'], [pctl], axis=0).tolist()
+                        geom_dict['coordinates'] = np.percentile(geom_dict['coordinates'], [pctl], axis=0).tolist()
+                    else:
+                        if not warned:
+                            warnings.warn('reducer = {} is not implemented'.format(reducer))
+                            warned = True
+
+                    out_geom_extract[geom_id] = geom_dict
+
+        return out_geom_extract
 
     def get_stats(self,
                   print_stats=False,
@@ -1491,4 +1638,3 @@ class MultiRaster:
             Opt.cprint('Written {}'.format(outfile))
         else:
             return lras
-
