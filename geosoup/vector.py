@@ -1307,3 +1307,25 @@ class Vector(object):
         except Exception as e:
             sys.stdout.write(e.args[0] + '\n')
             return 1
+
+    def merge(self):
+        """Under construction"""
+        pass
+
+    def union(self,
+              feature,
+              **kwargs):
+        """Under construction"""
+        pass
+
+    @staticmethod
+    def intersect(features,
+                  **kwargs):
+        """Under construction"""
+        pass
+
+    def clip(self,
+             feature,
+             **kwargs):
+        """Under construction"""
+        pass
