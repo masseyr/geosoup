@@ -413,7 +413,7 @@ class Euclidean(Distance):
         Apply proximity filter at a given threshold
         :param kwargs:
                 thresh: proximity threshold (default: 90th percentile) valid values: 1-99
-                        default 90
+                        default: 90
         :return: list of dictionaries
         """
         self.calc_dist_matrix()
