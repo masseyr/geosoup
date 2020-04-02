@@ -17,18 +17,45 @@ class Distance(object):
     def __init__(self,
                  samples=None,
                  names=None,
+                 csv_file=None,
                  index=None):
         """
         Class constructor
         :param samples: List of sample dictionaries
         :param names: Name of the columns or dimensions
+        :param csv_file: path of the csv file with sample data in columns
         :param index: Name of index column
         :return: _Distance object
         """
         self.samples = samples
         self.nsamp = len(samples)
         self.names = names
+        self.csv_file = csv_file
         self.index = index
+
+        if samples is not None:
+            self.samples = samples
+            self.nsamp = len(samples)
+
+        elif csv_file is not None:
+            self.samples = Handler(filename=csv_file).read_from_csv(return_dicts=True)
+            self.nsamp = len(self.samples)
+        else:
+            warnings.warn('Empty Samples class initialized')
+            self.samples = None
+            self.nsamp = 0
+
+        if self.nsamp > 0:
+            self.index = list(range(self.nsamp))
+        else:
+            self.index = list()
+
+        if names is not None:
+            self.names = names
+        elif self.samples is not None:
+            self.names = list(self.samples[0])
+        else:
+            self.names = list()
 
         self.matrix = None
         self.center = None
@@ -45,10 +72,13 @@ class Distance(object):
         nsamp = len(self.samples)
         nvar = len(self.names)
 
-        # copy data to matrix
-        samp_matrix = np.array([[self.samples[i][self.names[j]] for j in range(0, nvar)]
-                                for i in range(0, nsamp)])
-        self.matrix = samp_matrix
+        if nsamp > 1:
+            # copy data to matrix
+            self.matrix = np.array([[Handler.string_to_type(self.samples[i][self.names[j]])
+                                     for j in range(0, nvar)]
+                                    for i in range(0, self.nsamp)])
+        else:
+            raise ValueError('Not enough samples to make a matrix object')
 
     def cluster_center(self,
                        method='median'):
@@ -204,7 +234,7 @@ class Mahalanobis(Distance):
         return part_corr
 
 
-class Euclidean(object):
+class Euclidean(Distance):
     """
     Class for calculating Euclidean distance
     """
@@ -217,41 +247,19 @@ class Euclidean(object):
         :param csv_file: csv file that contains the samples
         :param samples: List of dictionaries
         """
+
         self.csv_file = csv_file
 
         self.index = None
         self.nfeat = None
 
-        if samples is not None:
-            self.samples = samples
-            self.nsamp = len(samples)
-
-        elif csv_file is not None:
-            self.samples = Handler(filename=csv_file).read_from_csv(return_dicts=True)
-            self.nsamp = len(self.samples)
-        else:
-            warnings.warn('Empty Samples class initialized')
-            self.samples = None
-            self.nsamp = 0
-
-        if self.nsamp > 0:
-            self.index = list(range(self.nsamp))
-        else:
-            self.index = list()
-
-        if names is not None:
-            self.names = names
-        elif self.samples is not None:
-            self.names = list(self.samples[0])
-        else:
-            self.names = list()
-
-        self.nvar = len(self.names)
+        super(Euclidean, self).__init__(samples,
+                                        names,
+                                        csv_file,
+                                        self.index)
 
         if self.samples is not None:
-            self.matrix = np.array([[Handler.string_to_type(self.samples[i][self.names[j]])
-                                     for j in range(0, self.nvar)]
-                                    for i in range(0, self.nsamp)])
+            self.sample_matrix()
         else:
             self.matrix = None
 
@@ -348,7 +356,7 @@ class Euclidean(object):
                          verbose=False):
         """
         method to remove points based on proximity threshold
-        :param thresh: proximity threshold (default: 90th percentile)
+        :param thresh: proximity threshold (default: 90th percentile) valid values: 1-99
         :param verbose: If steps should be displayed
         :return: None
         """
@@ -357,6 +365,12 @@ class Euclidean(object):
 
         if thresh is None:
             thresh = self.centroid('percentile_90')
+        elif 'percentile' in thresh:
+            pass
+        elif thresh in (int, float):
+            thresh = 'percentile_{}'.format(str(int(thresh)))
+        else:
+            warnings.warn('Invalid thresh value. Using default of 90th percentile')
 
         # number of close proximities associated with each element
         n_proxim = np.apply_along_axis(lambda x: np.count_nonzero((x > 0.0) & (x < thresh)),
@@ -397,9 +411,12 @@ class Euclidean(object):
                                **kwargs):
         """
         Apply proximity filter at a given threshold
-        :param kwargs: (thresh=None)
+        :param kwargs:
+                thresh: proximity threshold (default: 90th percentile) valid values: 1-99
+                        default 90
         :return: list of dictionaries
         """
         self.calc_dist_matrix()
         self.proximity_filter(**kwargs)
+
         return self.samples
