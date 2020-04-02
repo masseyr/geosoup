@@ -84,7 +84,7 @@ class Distance(object):
                        method='median'):
         """
         Method to determine cluster center of the sample matrix
-        :param method: Type of reducer to use. Options: 'mean', 'median', 'percentile_x'
+        :param method: Type of reducer to use. Options: 'mean', 'median', 'percentile_xx' where xx is 1-99
         :return: Cluster center (vector of column/dimension values)
         """
         if self.matrix is not None:
@@ -271,26 +271,6 @@ class Euclidean(Distance):
         return "<Euclidean class object at {} with {} samples>".format(hex(id(self)),
                                                                        str(len(self.samples)))
 
-    def centroid(self,
-                 method='median'):
-        """
-        Method to determine centroid of the sample matrix
-        :param method: Type of reducer to use. Options: 'mean', 'median', 'percentile_x'
-        :return: Cluster center (vector of column/dimension values)
-        """
-        if self.matrix is not None:
-            if method == 'median':
-                return np.array(np.median(self.matrix, axis=0))[0]
-            elif method == 'mean':
-                return np.array(np.mean(self.matrix, axis=0))[0]
-            elif 'percentile' in method:
-                perc = int(method.replace('percentile', '')[1:])
-                return np.array(np.percentile(self.matrix, perc, axis=0))[0]
-            else:
-                raise ValueError("Invalid or no reducer")
-        else:
-            raise ValueError("Sample matrix not found")
-
     @staticmethod
     def euc_dist(vec1,
                  vec2):
@@ -325,10 +305,9 @@ class Euclidean(Distance):
         """
 
         if verbose:
-            Opt.cprint('Building distance matrix : ', newline='')
+            Opt.cprint('Building distance matrix... ', newline='')
 
         if approach == 1:
-
             self.distance_matrix = np.apply_along_axis(lambda x: Euclidean.mat_dist(x, self.matrix),
                                                        1,
                                                        self.matrix)
@@ -364,13 +343,15 @@ class Euclidean(Distance):
             Opt.cprint('Applying proximity filter...')
 
         if thresh is None:
-            thresh = self.centroid('percentile_90')
-        elif 'percentile' in thresh:
-            pass
+            thresh = self.cluster_center('percentile_90')
+        elif 'percentile_' in thresh:
+            thresh = self.cluster_center(thresh)
         elif thresh in (int, float):
-            thresh = 'percentile_{}'.format(str(int(thresh)))
+            thresh = self.cluster_center('percentile_{}'.format(str(int(thresh))))
         else:
-            warnings.warn('Invalid thresh value. Using default of 90th percentile')
+            if verbose:
+                warnings.warn('Invalid thresh value.\n Using default: 90th percentile centroid vector.')
+            thresh = self.cluster_center('percentile_90')
 
         # number of close proximities associated with each element
         n_proxim = np.apply_along_axis(lambda x: np.count_nonzero((x > 0.0) & (x < thresh)),
