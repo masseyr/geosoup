@@ -3,6 +3,12 @@ import math
 
 
 class EEFunc(object):
+    """
+    Helper class for Google Earth Engine python API scripts
+    """
+
+    def __repr__(self):
+        return '<EEFunc helper class for Google Earth Engine python scripts>'
 
     @staticmethod
     def expand_image_meta(img_meta):
@@ -82,37 +88,77 @@ class EEFunc(object):
         return out_str
 
     @staticmethod
-    def ndvi_calc(img, scale_factor=10000):
-        """ Normalized difference vegetation index"""
+    def ndvi_calc(img,
+                  scale_factor=10000):
+        """
+        Normalized difference vegetation index
+        :param img: ee.Image object
+        :param scale_factor: Scale factor to multiply input ee.Image object with
+        :returns: ee.Image object
+        """
         return img.normalizedDifference(['NIR', 'RED']).select([0], ['NDVI']).multiply(scale_factor).toInt16()
 
     @staticmethod
-    def vari_calc(img, scale_factor=10000):
-        """ Visible Atmospherically Resistant Index"""
+    def vari_calc(img,
+                  scale_factor=10000):
+        """
+        Visible Atmospherically Resistant Index
+        :param img: ee.Image object
+        :param scale_factor: Scale factor to multiply input ee.Image object with
+        :returns: ee.Image object
+        """
         return (img.select(['RED']).subtract(img.select(['GREEN'])))\
             .divide(img.select(['RED']).add(img.select(['GREEN'])).subtract(img.select(['BLUE'])))\
             .select([0], ['VARI']).multiply(scale_factor).toInt16()
 
     @staticmethod
-    def ndwi_calc(img, scale_factor=10000):
-        """ Normalized difference wetness index"""
+    def ndwi_calc(img,
+                  scale_factor=10000):
+        """
+        Normalized difference wetness index
+        :param img: ee.Image object
+        :param scale_factor: Scale factor to multiply input ee.Image object with
+        :returns: ee.Image object
+        """
         return img.normalizedDifference(['NIR', 'SWIR2']).select([0], ['NDWI']).multiply(scale_factor).toInt16()
 
     @staticmethod
-    def nbr_calc(img, scale_factor=10000):
-        """ Normalized burn ratio"""
+    def nbr_calc(img,
+                 scale_factor=10000):
+        """
+        Normalized burn ratio
+        :param img: ee.Image object
+        :param scale_factor: Scale factor to multiply input ee.Image object with
+        :returns: ee.Image object
+        """
         return img.normalizedDifference(['NIR', 'SWIR1']).select([0], ['NBR']).multiply(scale_factor).toInt16()
 
     @staticmethod
-    def savi_calc(img, const=0.5, scale_factor=10000):
-        """ Soil adjusted vegetation index"""
+    def savi_calc(img,
+                  const=0.5,
+                  scale_factor=10000):
+        """
+        Soil adjusted vegetation index
+        :param img: ee.Image object
+        :param const: Constant value used in the formula
+        :param scale_factor: Scale factor to multiply input ee.Image object with
+        :returns: ee.Image object
+        """
         return (img.select(['NIR']).subtract(img.select(['RED'])).multiply(1 + const))\
             .divide(img.select(['NIR']).add(img.select(['RED'])).add(const))\
             .select([0], ['SAVI']).multiply(scale_factor).toInt16()
 
     @staticmethod
-    def add_indices(in_image, const=0.5, scale_factor=10000):
-        """ Function to add indices to an image:  NDVI, NDWI, VARI, NBR, SAVI"""
+    def add_indices(in_image,
+                    const=0.5,
+                    scale_factor=10000):
+        """
+        Function to add indices to an image:  NDVI, NDWI, VARI, NBR, SAVI
+        :param in_image: Input ee.Image object
+        :param const: constant used in SAVI calculation
+        :param scale_factor: Scale factor to multiply input ee.Image object with
+        :returns: ee.Image object
+        """
         temp_image = in_image.float().divide(scale_factor)
         return in_image.addBands(EEFunc.ndvi_calc(temp_image, scale_factor))\
             .addBands(EEFunc.ndwi_calc(temp_image, scale_factor))\
@@ -121,18 +167,30 @@ class EEFunc(object):
             .addBands(EEFunc.savi_calc(temp_image, const, scale_factor))
 
     @staticmethod
-    def add_suffix(in_image, suffix_str):
-        """ Add suffix to all band names"""
+    def add_suffix(in_image,
+                   suffix_str):
+        """
+        Add suffix to all band names
+        :param in_image: input ee.Image object
+        :param suffix_str: suffix to be added to all band names
+        :returns: ee.Image object
+        """
         bandnames = in_image.bandNames().map(lambda elem: ee.String(elem).toLowerCase().cat('_').cat(suffix_str))
         nb = bandnames.length()
         return in_image.select(ee.List.sequence(0, ee.Number(nb).subtract(1)), bandnames)
 
     @staticmethod
     def ls8_sr_corr(img):
-        """ Method to correct Landsat 8 based on Landsat 7 reflectance.
-            This method scales the SR reflectance values to match LS7 reflectance
-            The returned values are generally lower than input image
-            based on roy et al 2016"""
+        """
+        Method to correct Landsat 8 based on Landsat 7 reflectance.
+        This method scales the SR reflectance values to match LS7 reflectance
+        The returned values are generally lower than input image
+        based on roy et al 2016
+        See: https://www.sciencedirect.com/science/article/pii/S0034425715302455
+
+        :param img: ee.Image object
+        :returns ee.Image object
+        """
         return img.select(['B2'], ['BLUE']).float().multiply(0.8850).add(183).int16()\
             .addBands(img.select(['B3'], ['GREEN']).float().multiply(0.9317).add(123).int16())\
             .addBands(img.select(['B4'], ['RED']).float().multiply(0.9372).add(123).int16())\
@@ -146,10 +204,15 @@ class EEFunc(object):
 
     @staticmethod
     def ls5_sr_corr(img):
-        """ Method to correct Landsat 5 based on Landsat 7 reflectance.
-            This method scales the SR reflectance values to match LS7 reflectance
-            The returned values are generally lower than input image
-            based on sulla-menashe et al 2016"""
+        """
+        Method to correct Landsat 5 based on Landsat 7 reflectance.
+        This method scales the SR reflectance values to match LS7 reflectance
+        The returned values are generally lower than input image
+        based on sulla-menashe et al 2016
+
+        :param img: ee.Image object
+        :returns ee.Image object
+        """
         return img.select(['B1'], ['BLUE']).float().multiply(0.91996).add(37).int16()\
             .addBands(img.select(['B2'], ['GREEN']).float().multiply(0.92764).add(84).int16())\
             .addBands(img.select(['B3'], ['RED']).float().multiply(0.8881).add(98).int16())\
@@ -163,8 +226,13 @@ class EEFunc(object):
 
     @staticmethod
     def ls_sr_band_correction(img):
-        """ This method renames LS5, LS7, and LS8 bands and corrects LS5 and LS8 bands
-            this method should be used with SR only"""
+        """ T
+        his method renames LS5, LS7, and LS8 bands and corrects LS5 and LS8 bands
+        this method should be used with SR only
+
+        :param img: ee.Image object
+        :returns ee.Image object
+        """
         return \
             ee.Algorithms.If(
                 ee.String(img.get('SATELLITE')).compareTo('LANDSAT_8'),
@@ -185,21 +253,34 @@ class EEFunc(object):
             )
 
     @staticmethod
-    def ls_sr_only_clear(image):
-        """ Method to calcluate clear mask based on pixel_qa and radsat_qa bands"""
+    def ls_sr_only_clear(img):
+        """
+        Method to calcluate clear mask based on pixel_qa and radsat_qa bands
+
+        :param img: ee.Image object
+        :returns ee.Image object
+        """
         clearbit = 1
         clearmask = math.pow(2, clearbit)
-        qa = image.select('PIXEL_QA')
+        qa = img.select('PIXEL_QA')
         qa_mask = qa.bitwiseAnd(clearmask)
 
-        ra = image.select('RADSAT_QA')
+        ra = img.select('RADSAT_QA')
         ra_mask = ra.eq(0)
 
-        return ee.Image(image.updateMask(qa_mask).updateMask(ra_mask))
+        return ee.Image(img.updateMask(qa_mask).updateMask(ra_mask))
 
     @staticmethod
-    def maxval_comp_ndvi(collection, pctl=50, index='NDVI'):
-        """ function to make pctl th value composite"""
+    def maxval_comp_ndvi(collection,
+                         pctl=50,
+                         index='NDVI'):
+        """
+        function to make pctl th value composite
+
+        :param collection: ee.ImageCollection
+        :param pctl: percentile
+        :param index: Vegetation index to use for compositing
+        """
         index_band = collection.select(index).reduce(ee.Reducer.percentile([pctl]))
         with_dist = collection.map(lambda image: image.addBands(image.select(index)
                                                                  .subtract(index_band).abs().multiply(-1)
@@ -207,7 +288,18 @@ class EEFunc(object):
         return with_dist.qualityMosaic('quality')
 
     @staticmethod
-    def interval_mean(collection, min_pctl, max_pctl, internal_bands):
-        """ function to make interval mean composite"""
-        temp_img = collection.reduce(ee.Reducer.intervalMean(min_pctl, max_pctl))
-        return temp_img.select(ee.List.sequence(0, internal_bands.length().subtract(1)), internal_bands)
+    def interval_mean(collection,
+                      min_pctl,
+                      max_pctl,
+                      band_names):
+        """
+        function to make interval mean composite
+        :param collection: ee.ImageCollection object
+        :param min_pctl: minimum percentile for the interval mean
+        :param max_pctl: maximum percentile for the interval mean
+        :param band_names: List of band names to select from each image (band selector)
+        :returns: ee.Image object
+        """
+        temp_coll = ee.ImageCollection(collection).map(lambda img: img.select(band_names))
+        return temp_coll.reduce(ee.Reducer.intervalMean(min_pctl,
+                                                        max_pctl))
