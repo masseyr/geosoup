@@ -1765,7 +1765,7 @@ class Terrain(Raster):
         """Under construction"""
         pass
 
-    def concavity(self):
+    def tpi(self):
         """Under construction"""
         pass
 
