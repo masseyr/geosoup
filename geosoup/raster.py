@@ -1639,7 +1639,6 @@ class MultiRaster:
         else:
             return lras
 
-
         def mosaic(self,
                    order=None,
                    verbose=False,
