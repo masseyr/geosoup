@@ -1,6 +1,6 @@
  # Geosoup 0.1.7
 
-[![DOI](https://zenodo.org/badge/250706805.svg)](https://zenodo.org/badge/latestdoi/250706805)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3740290.svg)](https://doi.org/10.5281/zenodo.3740290)
 
 Geosoup is a python package for geospatial data manipulation using GDAL and GDAL bindings in python.
 
