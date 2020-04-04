@@ -34,6 +34,8 @@ class Vector(object):
         Constructor for class Vector
         :param filename: Name of the vector file (shapefile) with full path
         :param layer_index: Index of the vector layer to pull (default: 0)
+
+        todo: add union(), intersect(), clip(), and merge() methods
         """
 
         self.filename = filename
@@ -1308,25 +1310,3 @@ class Vector(object):
             sys.stdout.write(e.args[0] + '\n')
             return 1
 
-    def merge(self):
-        """Under construction"""
-        pass
-
-    def union(self,
-              feature,
-              **kwargs):
-        """Under construction"""
-        pass
-
-    @staticmethod
-    def intersect(features,
-                  **kwargs):
-        """Under construction"""
-        pass
-
-    def clip(self,
-             feature,
-             **kwargs):
-        """Under construction"""
-        pass
-    
