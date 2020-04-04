@@ -1,4 +1,4 @@
- # Geosoup 0.1.6
+ # Geosoup 0.1.7
 
 [![DOI](https://zenodo.org/badge/250706805.svg)](https://zenodo.org/badge/latestdoi/250706805)
 
