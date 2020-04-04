@@ -719,7 +719,8 @@ class Raster(object):
     def get_bounds(self,
                    xy_coordinates=True,
                    use_nodatavalue=False,
-                   return_datasource=False):
+                   return_datasource=False,
+                   return_memory_dataset=False):
         """
         Method to return a list of raster coordinates
         :param xy_coordinates: return a list of xy coordinates if true,
@@ -728,11 +729,13 @@ class Raster(object):
         :param use_nodatavalue: If the nodatavalue should be used to vectorize areas with data
                                 This will return a wkt geometry
         :param return_datasource: if bounds data sorce object should be returned
+        :param return_memory_dataset: If a dataset in memory should be returned (/vsimem object)
         :return:
               if use_nodatavalue flag is False and xy_coordinates is False: list of numbers
               if use_nodatavalue is False and xy_coordinates is True: list of lists
 
               if use_nodatavalue is True: wkt_geometry
+              if return_memory_dataset is selected: returns /vsimem/{basename}_bounds.shp
         """
         if not self.init:
             self.initialize()
@@ -752,13 +755,22 @@ class Raster(object):
         else:
 
             mask_ras = self.nodata_mask(in_memory=True)
+            basename = Handler(self.name).basename.split('.')[0]
+            out_name = None
 
-            out_driver = ogr.GetDriverByName('Memory')
-            out_datasource = out_driver.CreateDataSource('mem_source')
+            if return_memory_dataset:
+                out_name = '/vsimem/{}_bounds.shp'.format(basename)
+                out_driver = ogr.GetDriverByName('ESRI Shapefile')
+                out_datasource = out_driver.CreateDataSource('/vsimem/{}_bounds.shp'.format(basename))
+
+            else:
+                out_driver = ogr.GetDriverByName('Memory')
+                out_datasource = out_driver.CreateDataSource('mem_source')
+
             out_spref = osr.SpatialReference()
             out_spref.ImportFromWkt(self.crs_string)
 
-            out_layer = out_datasource.CreateLayer('tmp_vec',
+            out_layer = out_datasource.CreateLayer('{}_bounds'.format(basename),
                                                    srs=out_spref,
                                                    geom_type=OGR_TYPE_DEF['multipolygon'])
 
@@ -770,23 +782,29 @@ class Raster(object):
                             out_layer,
                             0)
 
-            geom_wkt = None
-            feat = out_layer.GetNextFeature()
-            while feat:
-                items = feat.items()
-                geom = feat.GetGeometryRef()
-                geom.CloseRings()
-                geom_wkt = geom.ExportToWkt()
-                if items['tmp_field'] != 1:
-                    feat = out_layer.GetNextFeature()
-                else:
-                    break
-
-            mask_ras = None
+            out_datasource.FlushCache()
 
             if return_datasource:
                 return out_datasource
+
+            elif return_memory_dataset:
+                out_datasource = None
+                return out_name
+
             else:
+                geom_wkt = None
+                feat = out_layer.GetNextFeature()
+                while feat:
+                    items = feat.items()
+                    geom = feat.GetGeometryRef()
+                    geom.CloseRings()
+                    geom_wkt = geom.ExportToWkt()
+                    if items['tmp_field'] != 1:
+                        feat = out_layer.GetNextFeature()
+                    else:
+                        break
+
+                mask_ras = None
                 out_datasource = None
                 return geom_wkt
 
@@ -1762,28 +1780,126 @@ class MultiRaster:
                verbose=False,
                outfile=None,
                nodata_values=None,
-               band_index=None,
                blend_images=True,
                blend_pixels=10,
                blend_cutline=None,
+               add_overviews=False,
                **kwargs):
         """
         Method to mosaic rasters in a given order
+        This method uses all bands of the given rasters
         :param order: order of raster layerstack
         :param verbose: If some of the steps should be printed to console
         :param outfile: Name of the output file (.tif)
-        :param nodata_values: Value or tuple (or list) of values used as nodata bands for each image to be mosaicked
-        :param band_index: list of bands to be used in mosaic (default: all)
+        :param nodata_values: Value or tuple (or list) of values used as
+                             nodata bands for each image to be mosaicked
         :param blend_images: If blending should be used in mosaicking (default True)
-        :param blend_cutline: OSGEO SWIG geometry of cutline
         :param blend_pixels: width of pixels to blend around the cutline or
-                             raster boundary for multiple rasters (default: 10)
+                     raster boundary for multiple rasters (default: 10)
+        :param blend_cutline: vector file (shapefile) in memory or on disk
+                              to use for blending
+        :param add_overviews: If overviews should be added to the resulting image
+        :param kwargs: Other options
 
         :return: None
 
-        valid warp options in kwargs : https://gdal.org/python/osgeo.gdal-module.html#WarpOptions
+        todo: 1) Implement band selection
+              2) better blending options
+                a) top image bounds buffered but same intersection line with other image
+                b) outside buffer
+
+        valid warp options in kwargs :
+         https://gdal.org/python/osgeo.gdal-module.html#WarpOptions
         """
-        pass
+
+        if order is None:
+            order = list(range(len(self.filelist)))
+
+        if verbose:
+            Opt.cprint('Files: \n{}'.format('\n'.join(list(self.filelist[i] for i in order))))
+
+        warp_dict = {}
+
+        warp_dict['options'] = []
+
+        if 'output_bounds' in kwargs:
+            warp_dict['outputBounds'] = kwargs['output_bounds']
+        else:
+            warp_dict['outputBounds'] = self.intersection
+
+        output_res = max(list(np.abs(self.resolutions[i][0]) for i in order))
+
+        if 'output_resolution' in kwargs:
+            warp_dict['xRes'] = kwargs['output_resolution'][0]
+            warp_dict['yRes'] = kwargs['output_resolution'][1]
+        else:
+            warp_dict['xRes'] = output_res
+            warp_dict['yRes'] = output_res
+
+        warp_dict['srcSRS'] = self.rasters[0].crs_string
+
+        if 'out_crs_string' in kwargs:
+            warp_dict['dstSRS'] = kwargs['out_crs_string']
+        else:
+            warp_dict['dstSRS'] = warp_dict['srcSRS']
+
+        if nodata_values is not None:
+            warp_dict['srcNodata'] = nodata_values
+        else:
+            warp_dict['srcNodata'] = list(ras.nodatavalue for ras in self.rasters)
+
+        if 'outnodatavalue' in kwargs:
+            warp_dict['dstNodata'] = kwargs['outnodatavalue']
+        else:
+            warp_dict['dstNodata'] = self.nodatavalue[0]
+
+        if 'resample' in kwargs:
+            warp_dict['resampleAlg'] = kwargs['resample']
+        else:
+            warp_dict['resampleAlg'] = 'bilinear'
+
+        if verbose:
+            Opt.cprint('Getting bounds ...')
+
+        warp_dict['outputBounds'] = self.get_intersection(index=order)
+        warp_dict['separate'] = True
+        warp_dict['targetAlignedPixels'] = True
+        warp_dict['hideNodata'] = False
+        warp_dict['outputType'] = self.rasters[0].dtype
+
+        if blend_images:
+            if blend_cutline is not None:
+                blend_datasource = ogr.Open(blend_cutline)
+                blend_layer = blend_datasource.GetLayerByIndex(0)
+                blend_layer_name = blend_layer.GetName()
+
+                warp_dict['cutlineDSName'] = blend_cutline
+                warp_dict['cutlineLayer'] = blend_layer_name
+                warp_dict['cutlineBlend'] = blend_pixels
+
+            else:
+                blend_dset = self.rasters[0].get_bounds(use_nodatavalue=True,
+                                                        return_memory_dataset=True)
+                warp_dict['cutlineDSName'] = blend_dset
+                warp_dict['cutlineLayer'] = Handler(blend_dset).basename.split('.')[0]
+                warp_dict['cutlineBlend'] = blend_pixels
+
+        if 'compress' in kwargs:
+            warp_dict['options'].append('COMPRESS={}'.format(str(kwargs['compress']).upper()))
+
+        if 'bigtiff' in kwargs:
+            warp_dict['options'].append('BIGTIFF={}'.format(str(kwargs['bigtiff']).upper()))
+
+        _warp_opts_ = gdal.WarpOptions(**warp_dict)
+
+        gdal.Warp(outfile, self.filelist, options=_warp_opts_)
+
+        if add_overviews:
+            ras = Raster(outfile)
+            if type(add_overviews) == list:
+                ras.add_overviews(overviews=add_overviews)
+            else:
+                ras.add_overviews()
 
 
 class Terrain(Raster):
