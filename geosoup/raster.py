@@ -1815,7 +1815,6 @@ class MultiRaster:
         :param outfile: Name of the output file (.tif)
         :param nodata_values: Value or tuple (or list) of values used as
                              nodata bands for each image to be mosaicked
-        :param blend_images: If blending should be used in mosaicking (default True)
         :param blend_pixels: width of pixels to blend around the cutline or
                      raster boundary for multiple rasters (default: 10)
         :param blend_cutline: vector file (shapefile) in memory or on disk
