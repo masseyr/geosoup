@@ -720,7 +720,8 @@ class Raster(object):
                    xy_coordinates=True,
                    use_nodatavalue=False,
                    return_datasource=False,
-                   return_memory_dataset=False):
+                   return_memory_dataset=False,
+                   with_buffer=0.0):
         """
         Method to return a list of raster coordinates
         :param xy_coordinates: return a list of xy coordinates if true,
@@ -730,6 +731,7 @@ class Raster(object):
                                 This will return a wkt geometry
         :param return_datasource: if bounds data sorce object should be returned
         :param return_memory_dataset: If a dataset in memory should be returned (/vsimem object)
+        :param with_buffer: the geometry is buffered by specified pixels if > 0
         :return:
               if use_nodatavalue flag is False and xy_coordinates is False: list of numbers
               if use_nodatavalue is False and xy_coordinates is True: list of lists
@@ -784,6 +786,26 @@ class Raster(object):
 
             out_datasource.FlushCache()
 
+            geom_wkt = None
+            del_feat_id = []
+            nfeat = out_layer.GetFeatureCount()
+
+            for feat_indx in range(nfeat):
+                feat = out_layer.GetFeature(feat_indx)
+                items = feat.items()
+                if items['tmp_field'] != 1:
+                    out_layer.DeleteFeature(feat.GetFID())
+                else:
+                    geom = feat.GetGeometryRef()
+                    geom.CloseRings()
+                    if with_buffer > 0:
+                        geom = geom.Buffer(self.transform[0]*float(with_buffer))
+
+                    geom_wkt = geom.ExportToWkt()
+
+            out_datasource.ExecuteSQL('REPACK ' + out_layer.GetName())
+            out_datasource.ExecuteSQL('RECOMPUTE EXTENT ON ' + out_layer.GetName())
+
             if return_datasource:
                 return out_datasource
 
@@ -792,17 +814,6 @@ class Raster(object):
                 return out_name
 
             else:
-                geom_wkt = None
-                feat = out_layer.GetNextFeature()
-                while feat:
-                    items = feat.items()
-                    geom = feat.GetGeometryRef()
-                    geom.CloseRings()
-                    geom_wkt = geom.ExportToWkt()
-                    if items['tmp_field'] != 1:
-                        feat = out_layer.GetNextFeature()
-                    else:
-                        break
 
                 mask_ras = None
                 out_datasource = None
@@ -1543,12 +1554,14 @@ class MultiRaster:
         self.nodatavalue = list(raster.nodatavalue for raster in self.rasters)
         self.resolutions = list((raster.transform[1], raster.transform[5]) for raster in self.rasters)
 
-    def get_intersection(self,
-                         index=None,
-                         _return=True):
+    def get_extent(self,
+                   index=None,
+                   intersection=True,
+                   _return=True):
         """
         Method to get intersecting bounds of the raster objects
         :param index: list of indices of raster files/objects
+        :param intersection: If intersection (True) should be returned or union (False) (Default: True)
         :param _return: Should the method return the bound coordinates
         :return: coordinates of intersection (minx, miny, maxx, maxy)
         """
@@ -1569,19 +1582,26 @@ class MultiRaster:
 
         geoms = list(ogr.CreateGeometryFromWkt(wktstring) for wktstring in wkt_list)
 
-        temp_geom = geoms[0]
+        if intersection:
+            temp_geom = geoms[0]
+            for geom in geoms[1:]:
+                temp_geom = temp_geom.Intersection(geom)
+        else:
+            multi_geom = ogr.Geometry(ogr.wkbMultiPolygon)
 
-        for geom in geoms[1:]:
-            temp_geom = temp_geom.Intersection(geom)
+            for geom in geoms:
+                multi_geom.AddGeometryDirectly(geom)
 
-        temp_geom = temp_geom.ExportToWkt()
+            temp_geom = multi_geom.UnionCascaded()
+
+        temp_geom_wkt = temp_geom.ExportToWkt()
 
         temp_coords = list(list(float(elem.strip()) for elem in elem_.strip()
                                                                      .split(' '))
-                           for elem_ in temp_geom.replace('POLYGON', '')
-                                                 .replace('((', '')
-                                                 .replace('))', '')
-                                                 .split(','))
+                           for elem_ in temp_geom_wkt.replace('POLYGON', '')
+                                                     .replace('((', '')
+                                                     .replace('))', '')
+                                                     .split(','))
 
         minx = min(list(coord[0] for coord in temp_coords))
         miny = min(list(coord[1] for coord in temp_coords))
@@ -1653,7 +1673,7 @@ class MultiRaster:
         if verbose:
             Opt.cprint('Getting bounds ...')
 
-        vrt_dict['outputBounds'] = self.get_intersection(index=order)
+        vrt_dict['outputBounds'] = self.get_extent(index=order)
         vrt_dict['separate'] = True
         vrt_dict['hideNodata'] = False
 
@@ -1780,7 +1800,6 @@ class MultiRaster:
                verbose=False,
                outfile=None,
                nodata_values=None,
-               blend_images=True,
                blend_pixels=10,
                blend_cutline=None,
                add_overviews=False,
@@ -1803,10 +1822,8 @@ class MultiRaster:
 
         :return: None
 
-        todo: 1) Implement band selection
-              2) better blending options
-                a) top image bounds buffered but same intersection line with other image
-                b) outside buffer
+        todo: 1) band selection
+              2) blending options: image bounds buffered at intersection with other image
 
         valid warp options in kwargs :
          https://gdal.org/python/osgeo.gdal-module.html#WarpOptions
@@ -1821,11 +1838,6 @@ class MultiRaster:
         warp_dict = {}
 
         warp_dict['options'] = []
-
-        if 'output_bounds' in kwargs:
-            warp_dict['outputBounds'] = kwargs['output_bounds']
-        else:
-            warp_dict['outputBounds'] = self.intersection
 
         output_res = max(list(np.abs(self.resolutions[i][0]) for i in order))
 
@@ -1861,34 +1873,25 @@ class MultiRaster:
         if verbose:
             Opt.cprint('Getting bounds ...')
 
-        warp_dict['outputBounds'] = self.get_intersection(index=order)
-        warp_dict['separate'] = True
+        warp_dict['outputBounds'] = self.get_extent(index=order,
+                                                    intersection=False)
         warp_dict['targetAlignedPixels'] = True
-        warp_dict['hideNodata'] = False
         warp_dict['outputType'] = self.rasters[0].dtype
 
-        if blend_images:
-            if blend_cutline is not None:
-                blend_datasource = ogr.Open(blend_cutline)
-                blend_layer = blend_datasource.GetLayerByIndex(0)
-                blend_layer_name = blend_layer.GetName()
+        if blend_cutline is not None:
+            blend_datasource = ogr.Open(blend_cutline)
+            blend_layer = blend_datasource.GetLayerByIndex(0)
+            blend_layer_name = blend_layer.GetName()
 
-                warp_dict['cutlineDSName'] = blend_cutline
-                warp_dict['cutlineLayer'] = blend_layer_name
-                warp_dict['cutlineBlend'] = blend_pixels
-
-            else:
-                blend_dset = self.rasters[0].get_bounds(use_nodatavalue=True,
-                                                        return_memory_dataset=True)
-                warp_dict['cutlineDSName'] = blend_dset
-                warp_dict['cutlineLayer'] = Handler(blend_dset).basename.split('.')[0]
-                warp_dict['cutlineBlend'] = blend_pixels
+            warp_dict['cutlineDSName'] = blend_cutline
+            warp_dict['cutlineLayer'] = blend_layer_name
+            warp_dict['cutlineBlend'] = blend_pixels
 
         if 'compress' in kwargs:
-            warp_dict['options'].append('COMPRESS={}'.format(str(kwargs['compress']).upper()))
+            warp_dict['creationOptions'].append('COMPRESS={}'.format(str(kwargs['compress']).upper()))
 
         if 'bigtiff' in kwargs:
-            warp_dict['options'].append('BIGTIFF={}'.format(str(kwargs['bigtiff']).upper()))
+            warp_dict['creationOptions'].append('BIGTIFF={}'.format(str(kwargs['bigtiff']).upper()))
 
         _warp_opts_ = gdal.WarpOptions(**warp_dict)
 
