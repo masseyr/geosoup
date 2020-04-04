@@ -1832,6 +1832,7 @@ class Terrain(Raster):
                           valid options:
                              4-neighbor: 'ZevenbergenThorne'
                              8-neighbor: 'Horn'
+                             
         :param zero_for_flat: whether to return 0 for flat areas with slope=0, instead of -9999.
         :param trigonometric: whether to return trigonometric angle instead of azimuth.
                              Here 0deg will mean East, 90deg North, 180deg West, 270deg South.
