@@ -1108,6 +1108,9 @@ class Raster(object):
         :return: Dictionary of dictionaries
                 {internal_id: {'values': [[band1, ], ], 'coordinates': [(x1, y1), ]}, }
                 if geom_id is supplied then internal_id is the supplied geom_id
+
+        todo: Implement separation of overlapping feature extractions
+
         """
         if band_order is None:
             band_order = list(range(self.shape[0]))
