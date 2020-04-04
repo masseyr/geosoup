@@ -1,5 +1,6 @@
 import numpy as np
 from geosoup.common import Handler, Opt
+from geosoup.gdaldefs import OGR_TYPE_DEF, OGR_FIELD_DEF
 import warnings
 from osgeo import gdal, gdal_array, ogr, osr, gdalconst
 np.set_printoptions(suppress=True)
@@ -126,23 +127,30 @@ class Raster(object):
                     fileptr.GetRasterBand(i + 1).SetNoDataValue(self.nodatavalue)
                 if verbose:
                     Opt.cprint('Writing band: ' + self.bnames[i])
-
-        fileptr.FlushCache()
-        fileptr = None
-
-        if verbose:
-            Opt.cprint('File written to disk!')
-
-        if add_overview:
+        if driver == 'MEM':
             if verbose:
-                Opt.cprint('\nWriting overview')
+                Opt.cprint('File written to memory!')
+            return fileptr
 
-            self.add_overviews(resampling,
-                               overviews,
-                               **kwargs)
+        else:
+            fileptr.FlushCache()
+            fileptr = None
 
             if verbose:
-                Opt.cprint('Overview written to disk!')
+                Opt.cprint('File written to disk!')
+
+            if add_overview:
+                if verbose:
+                    Opt.cprint('\nWriting overview')
+
+                out_ras = Raster(outfile)
+                out_ras.add_overviews(resampling,
+                                      overviews,
+                                      **kwargs)
+                out_ras = None
+
+                if verbose:
+                    Opt.cprint('Overview written to disk!')
 
     def add_overviews(self,
                       resampling='nearest',
@@ -235,13 +243,62 @@ class Raster(object):
         else:
             self.array = array3d
 
+    def nodata_mask(self,
+                    use_band=0,
+                    outfile=None,
+                    in_memory=False,
+                    add_overviews=False,
+                    out_format='GTiff',
+                    data_type=gdal.GDT_Byte):
+        """
+        Method to write a mask for the input raster using nodata value as 0 and valid pixels as 1
+        :param use_band: Band index to use for making the mask (Default: 0)
+        :param outfile: Output file path
+        :param in_memory: If the raster should be stored in memory (Default: False)
+        :param add_overviews: If overviews should be added,
+                              ignored if in_memory is True (Default: False)
+        :param out_format: output file format,
+                           ignored if in_memory is True (Default: 'GTiff')
+        :param data_type: Output data type (default: Byte)
+        """
+
+        self.initialize(get_array=True,
+                        band_order=[use_band])
+
+        if not in_memory:
+            if outfile is None:
+                outfile = Handler(self.name).add_to_filename('_mask')
+
+        temp_arr = self.array[0, :, :]
+        temp_arr[np.where(temp_arr != self.nodatavalue)] = 1
+        temp_arr[np.where(temp_arr == self.nodatavalue)] = 0
+
+        temp_ras = Raster('temp_ras')
+        temp_ras.nodatavalue = self.nodatavalue
+        temp_ras.array = temp_arr
+        temp_ras.shape = [1, self.shape[1], self.shape[2]]
+        temp_ras.transform = self.transform
+        temp_ras.crs_string = self.crs_string
+        temp_ras.dtype = data_type
+        temp_ras.bnames = ['mask']
+
+        if in_memory:
+            temp_ras.datasource = temp_ras.write_to_file(driver='MEM')
+            return temp_ras
+
+        else:
+            temp_ras.write_to_file(outfile=outfile,
+                                   driver=out_format,
+                                   add_overviews=add_overviews)
+
     def initialize(self,
                    get_array=False,
                    band_order=None,
                    finite_only=True,
                    nan_replacement=0.0,
                    use_dict=None,
-                   sensor=None):
+                   sensor=None,
+                   verbose=False):
 
         """
         Initialize a raster object from a file
@@ -251,10 +308,12 @@ class Raster(object):
         :param nan_replacement: replacement for all non-finite replacements
         :param use_dict: Dictionary to use for renaming bands
         :param sensor: Sensor to be used with dictionary (resources.bname_dict)
+        :param verbose: If some steps should be displayed
         (ignored if finite_only, get_array is false)
         :return None
         """
         self.init = True
+
         raster_name = self.name
 
         if Handler(raster_name).file_exists() or 'vsimem' in self.name:
@@ -289,9 +348,11 @@ class Raster(object):
                     if np.isnan(array3d).any() or np.isinf(array3d).any():
                         array3d[np.isnan(array3d)] = nan_replacement
                         array3d[np.isinf(array3d)] = nan_replacement
-                        Opt.cprint("Non-finite values replaced with " + str(nan_replacement))
+                        if verbose:
+                            Opt.cprint("Non-finite values replaced with " + str(nan_replacement))
                     else:
-                        Opt.cprint("Non-finite values absent in file")
+                        if verbose:
+                            Opt.cprint("Non-finite values absent in file")
 
                 # get band names
                 for i in range(0, bands):
@@ -299,7 +360,8 @@ class Raster(object):
 
             # band order present
             else:
-                Opt.cprint('Reading bands: {}'.format(" ".join([str(b) for b in band_order])))
+                if verbose:
+                    Opt.cprint('Reading bands: {}'.format(" ".join([str(b) for b in band_order])))
 
                 bands = len(band_order)
 
@@ -321,7 +383,9 @@ class Raster(object):
                 # read array and store the band values and name in array
                 for i, b in enumerate(band_order):
                     bandname = fileptr.GetRasterBand(b + 1).GetDescription()
-                    Opt.cprint('Reading band {}'.format(bandname))
+
+                    if verbose:
+                        Opt.cprint('Reading band {}'.format(bandname))
 
                     if self.array_offsets is None:
                         array3d[i, :, :] = fileptr.GetRasterBand(b + 1).ReadAsArray()
@@ -335,9 +399,11 @@ class Raster(object):
                     if np.isnan(array3d).any() or np.isinf(array3d).any():
                         array3d[np.isnan(array3d)] = nan_replacement
                         array3d[np.isinf(array3d)] = nan_replacement
-                        Opt.cprint("Non-finite values replaced with " + str(nan_replacement))
+                        if verbose:
+                            Opt.cprint("Non-finite values replaced with " + str(nan_replacement))
                     else:
-                        Opt.cprint("Non-finite values absent in file")
+                        if verbose:
+                            Opt.cprint("Non-finite values absent in file")
 
             # assign to empty class object
             self.array = array3d
@@ -645,32 +711,84 @@ class Raster(object):
         if type(coords_list) != list:
             coords_list = [coords_list]
 
-        return list(((coord[0] - tie_point[0])//pixel_size[0],
-                     (coord[1] - tie_point[1])//pixel_size[1])
+        return list(((coord[0] - tie_point[0]) // pixel_size[0],
+                     (coord[1] - tie_point[1]) // pixel_size[1])
                     if coord is not None else [None, None]
                     for coord in coords_list)
 
     def get_bounds(self,
-                   xy_coordinates=True):
+                   xy_coordinates=True,
+                   use_nodatavalue=False,
+                   return_datasource=False):
         """
         Method to return a list of raster coordinates
-        :param xy_coordinates: return a list of xy coordinates if true, else return [xmin, xmax, ymin, ymax]
-        :return: List of lists
+        :param xy_coordinates: return a list of xy coordinates if true,
+                              else return [xmin, xmax, ymin, ymax]
+                              Ignored if use_nodatavalue is True
+        :param use_nodatavalue: If the nodatavalue should be used to vectorize areas with data
+                                This will return a wkt geometry
+        :param return_datasource: if bounds data sorce object should be returned
+        :return:
+              if use_nodatavalue flag is False and xy_coordinates is False: list of numbers
+              if use_nodatavalue is False and xy_coordinates is True: list of lists
+
+              if use_nodatavalue is True: wkt_geometry
         """
         if not self.init:
             self.initialize()
         tie_pt = [self.transform[0], self.transform[3]]
 
-        if xy_coordinates:
-            return [tie_pt,
-                    [tie_pt[0] + self.metadict['xpixel'] * self.shape[2], tie_pt[1]],
-                    [tie_pt[0] + self.metadict['xpixel'] * self.shape[2],
-                     tie_pt[1] - self.metadict['ypixel'] * self.shape[1]],
-                    [tie_pt[0], tie_pt[1] - self.metadict['ypixel'] * self.shape[1]],
-                    tie_pt]
+        if not use_nodatavalue:
+            if xy_coordinates:
+                return [tie_pt,
+                        [tie_pt[0] + self.metadict['xpixel'] * self.shape[2], tie_pt[1]],
+                        [tie_pt[0] + self.metadict['xpixel'] * self.shape[2],
+                         tie_pt[1] - self.metadict['ypixel'] * self.shape[1]],
+                        [tie_pt[0], tie_pt[1] - self.metadict['ypixel'] * self.shape[1]],
+                        tie_pt]
+            else:
+                return [tie_pt[0], tie_pt[0] + self.metadict['xpixel'] * self.shape[2],
+                        tie_pt[1] - self.metadict['ypixel'] * self.shape[1], tie_pt[1]]
         else:
-            return [tie_pt[0], tie_pt[0] + self.metadict['xpixel'] * self.shape[2],
-                    tie_pt[1] - self.metadict['ypixel'] * self.shape[1], tie_pt[1]]
+
+            mask_ras = self.nodata_mask(in_memory=True)
+
+            out_driver = ogr.GetDriverByName('Memory')
+            out_datasource = out_driver.CreateDataSource('mem_source')
+            out_spref = osr.SpatialReference()
+            out_spref.ImportFromWkt(self.crs_string)
+
+            out_layer = out_datasource.CreateLayer('tmp_vec',
+                                                   srs=out_spref,
+                                                   geom_type=OGR_TYPE_DEF['multipolygon'])
+
+            out_field = ogr.FieldDefn('tmp_field', OGR_FIELD_DEF['int'])
+            out_layer.CreateField(out_field)
+
+            gdal.Polygonize(mask_ras.datasource.GetRasterBand(1),
+                            None,
+                            out_layer,
+                            0)
+
+            geom_wkt = None
+            feat = out_layer.GetNextFeature()
+            while feat:
+                items = feat.items()
+                geom = feat.GetGeometryRef()
+                geom.CloseRings()
+                geom_wkt = geom.ExportToWkt()
+                if items['tmp_field'] != 1:
+                    feat = out_layer.GetNextFeature()
+                else:
+                    break
+
+            mask_ras = None
+
+            if return_datasource:
+                return out_datasource
+            else:
+                out_datasource = None
+                return geom_wkt
 
     def get_pixel_bounds(self,
                          bound_coords=None,
@@ -1650,8 +1768,6 @@ class MultiRaster:
                blend_cutline=None,
                **kwargs):
         """
-        Under construction
-
         Method to mosaic rasters in a given order
         :param order: order of raster layerstack
         :param verbose: If some of the steps should be printed to console
@@ -1665,71 +1781,7 @@ class MultiRaster:
 
         :return: None
 
-        valid warp options in kwargs
-        (from https://gdal.org/python/osgeo.gdal-module.html#WarpOptions):
-
-          options --- can be be an array of strings, a string or let empty and filled from other keywords.
-          format --- output format ("GTiff", etc...)
-          outputBounds --- output bounds as (minX, minY, maxX, maxY) in target SRS
-          outputBoundsSRS --- SRS in which output bounds are expressed, in the case they are not expressed in dstSRS
-          xRes, yRes --- output resolution in target SRS
-          targetAlignedPixels --- whether to force output bounds to be multiple of output resolution
-          width --- width of the output raster in pixel
-          height --- height of the output raster in pixel
-          srcSRS --- source SRS
-          dstSRS --- output SRS
-          srcAlpha --- whether to force the last band of the input dataset to be considered as an alpha band
-          dstAlpha --- whether to force the creation of an output alpha band
-          outputType --- output type (gdal.GDT_Byte, etc...)
-          workingType --- working type (gdal.GDT_Byte, etc...)
-          warpOptions --- list of warping options
-          errorThreshold --- error threshold for approximation transformer (in pixels)
-          warpMemoryLimit --- size of working buffer in bytes
-          resampleAlg --- resampling mode
-          creationOptions --- list of creation options
-          srcNodata --- source nodata value(s)
-          dstNodata --- output nodata value(s)
-          multithread --- whether to multithread computation and I/O operations
-          tps --- whether to use Thin Plate Spline GCP transformer
-          rpc --- whether to use RPC transformer
-          geoloc --- whether to use GeoLocation array transformer
-          polynomialOrder --- order of polynomial GCP interpolation
-          transformerOptions --- list of transformer options
-          cutlineDSName --- cutline dataset name
-          cutlineLayer --- cutline layer name
-          cutlineWhere --- cutline WHERE clause
-          cutlineSQL --- cutline SQL statement
-          cutlineBlend --- cutline blend distance in pixels
-          cropToCutline --- whether to use cutline extent for output bounds
-          copyMetadata --- whether to copy source metadata
-          metadataConflictValue --- metadata data conflict value
-          setColorInterpretation --- whether to force color interpretation of input bands to output bands
-          callback --- callback method
-          callback_data --- user data for callback
-
-        For valid translate options, see MultiRaster.layerstack()
-
-
-        steps:
-        1) vectorize each layer in blend_layers according to vectorize_values
-        2) calculate buffer in 1 pixel step from vectorized shapes
-        3) Only two images at a time, the one on top and the once below it, are weighted, and weighted function calculated
-        4) calculate weighting function output using vrt via tiling
-
-
-        if vectorize_values is None:
-            vectorize_values = list(self.nodatavalue[i-1] for i in blend_bands)
-
-        elif type(vectorize_values) not in (list, tuple):
-            if type(vectorize_values) != np.ndarray:
-                vectorize_values = list(vectorize_values for _ in blend_bands)
-            else:
-                raise ValueError('Values to vectorize should be one of: tuple, list, int, or float')
-
-        vector_list = list()
-        for ii, val in enumerate(vectorize_values):
-            temp_vec =
-
+        valid warp options in kwargs : https://gdal.org/python/osgeo.gdal-module.html#WarpOptions
         """
         pass
 
@@ -1757,15 +1809,14 @@ class Terrain(Raster):
                                       crs_string)
 
     def __repr__(self):
-        if self.shape is not None:
-            return 'Terrain ' + super(Terrain, self).__repr__()
+        return 'Terrain: ' + super(Terrain, self).__repr__()
 
     def slope(self,
               outfile=None,
               slope_format='degree',
               file_format='GTiff',
               compute_edges=True,
-              band=0,
+              band=1,
               scale=None,
               algorithm='ZevenbergenThorne',
               **creation_options):
@@ -1788,6 +1839,8 @@ class Terrain(Raster):
                                  compress='LZW'
                                  bigtiff='yes'
         """
+        if not self.init:
+            self.initialize()
 
         creation_option_list = list()
         for key, value in creation_options.items():
@@ -1811,7 +1864,7 @@ class Terrain(Raster):
                outfile=None,
                file_format='GTiff',
                compute_edges=True,
-               band=0,
+               band=1,
                scale=None,
                algorithm='ZevenbergenThorne',
                zero_for_flat=True,
@@ -1839,6 +1892,8 @@ class Terrain(Raster):
                                  compress='LZW'
                                  bigtiff='yes'
         """
+        if not self.init:
+            self.initialize()
 
         creation_option_list = list()
         for key, value in creation_options.items():
@@ -1863,7 +1918,7 @@ class Terrain(Raster):
             outfile=None,
             file_format='GTiff',
             compute_edges=True,
-            band=0,
+            band=1,
             scale=None,
             algorithm='Horn',
             **creation_options):
@@ -1885,6 +1940,8 @@ class Terrain(Raster):
                                  compress='LZW'
                                  bigtiff='yes'
         """
+        if not self.init:
+            self.initialize()
 
         creation_option_list = list()
         for key, value in creation_options.items():
@@ -1907,9 +1964,9 @@ class Terrain(Raster):
             outfile=None,
             file_format='GTiff',
             compute_edges=True,
-            band=0,
+            band=1,
             scale=None,
-            algorithm='ZevenbergenThorne',
+            algorithm='Horn',
             **creation_options):
 
         """
@@ -1929,6 +1986,8 @@ class Terrain(Raster):
                                  compress='LZW'
                                  bigtiff='yes'
         """
+        if not self.init:
+            self.initialize()
 
         creation_option_list = list()
         for key, value in creation_options.items():
@@ -1951,7 +2010,7 @@ class Terrain(Raster):
                   outfile=None,
                   file_format='GTiff',
                   compute_edges=True,
-                  band=0,
+                  band=1,
                   scale=None,
                   algorithm='ZevenbergenThorne',
                   **creation_options):
@@ -1973,6 +2032,8 @@ class Terrain(Raster):
                                  compress='LZW'
                                  bigtiff='yes'
         """
+        if not self.init:
+            self.initialize()
 
         creation_option_list = list()
         for key, value in creation_options.items():
@@ -1995,7 +2056,7 @@ class Terrain(Raster):
                   outfile=None,
                   file_format='GTiff',
                   compute_edges=True,
-                  band=0,
+                  band=1,
                   scale=None,
                   algorithm='ZevenbergenThorne',
                   z_factor=1,
@@ -2035,7 +2096,8 @@ class Terrain(Raster):
                                  compress='LZW'
                                  bigtiff='yes'
         """
-
+        if not self.init:
+            self.initialize()
 
         creation_option_list = list()
         for key, value in creation_options.items():
