@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="geosoup",
-    version="0.1.7",
+    version="0.1.9",
     author="Richard Massey",
     author_email="rm885@nau.edu",
     description="Geospatial data manipulation using GDAL in python",
