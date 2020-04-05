@@ -1,5 +1,5 @@
 import numpy as np
-from geosoup.common import Handler, Opt
+from geosoup.common import Handler, Opt, Sublist
 import warnings
 from osgeo import gdal, gdal_array, ogr, osr, gdalconst
 np.set_printoptions(suppress=True)
@@ -1114,9 +1114,54 @@ class Raster(object):
 
             tile_counter += 1
 
+    @staticmethod
+    def index_geom_wkt(wkt_strings,
+                       geom_ids=None,
+                       separate_multi_geom=True):
+
+        """
+        Method to index list of OGR geometry strings and
+        split OGR multi-geometry wkt strings into single geometries
+
+        :param wkt_strings: List of OGR geometry wkt strings
+        :param geom_ids: List of geometry ids corresponding to wkt_string list
+        :param separate_multi_geom: (bool) Flag to separate multigeometries into smaller geometries
+        :returns: Dictionary {geom_id: geom_wkt, }
+        """
+
+        id_geom_dict = dict()
+        geom_types = []
+
+        for wkt_string_indx, wkt_string in enumerate(range(len(wkt_strings))):
+            # multi geometry should be separated
+            if separate_multi_geom:
+                if ('MULTI' in wkt_string) or ('multi' in wkt_string):
+
+                    # if multi geometry should be separated then add M prefix to index and
+                    # add another index of the geometry after underscore
+                    multi_geom = ogr.CreateGeometryFromWkt(wkt_string)
+
+                    for multi_geom_indx in range(multi_geom.GetGeometryCount()):
+                        geom_internal_id = '{}_{}'.format(str(wkt_string_indx), str(multi_geom_indx))\
+                            if geom_ids is None else '{}_{}'.format(str(geom_ids[wkt_string_indx]),
+                                                                    str(multi_geom_indx))
+                        id_geom_dict[geom_internal_id] = multi_geom.GetGeometryRef(multi_geom_indx)
+
+                else:
+                    # if no multi geometry in the string
+                    id_geom_dict[str(wkt_string_indx) if geom_ids is None else geom_ids[wkt_string_indx]] = \
+                        ogr.CreateGeometryFromWkt(wkt_string)
+
+            else:
+                # if multi geometry should not be separated
+                id_geom_dict[str(wkt_string_indx) if geom_ids is None else geom_ids[wkt_string_indx]] = \
+                    ogr.CreateGeometryFromWkt(wkt_string)
+
+        return id_geom_dict
+
     def extract_geom(self,
                      wkt_strings,
-                     geom_id=None,
+                     geom_ids=None,
                      band_order=None,
                      **kwargs):
         """
@@ -1127,7 +1172,7 @@ class Raster(object):
                            this geometry should be in the same CRS as the raster
                            Currently only 'Point' or 'MultiPoint' geometry is supported.
                            Accepted wkt_strings: List of POINT or MULTIPOINT wkt(s)
-        :param geom_id: List of geometry IDs
+        :param geom_ids: List of geometry IDs
                         If for a MultiGeom only one ID is presented,
                         it will be suffixed with the order of the geometry part
         :param band_order: Order of bands to be extracted (list of band indices)  default: all bands
@@ -1163,10 +1208,10 @@ class Raster(object):
             tile_size = (self.shape[1], self.shape[2])
 
         # if multi geometries should be separated or not
-        if 'multi_geom_separate' in kwargs:
-            multi_geom_separate = kwargs['multi_geom_separate']
+        if 'separate_multi_geom' in kwargs:
+            separate_multi_geom = kwargs['separate_multi_geom']
         else:
-            multi_geom_separate = False
+            separate_multi_geom = False
 
         if 'pass_pixel_coords' in kwargs:
             pass_pixel_coords = kwargs['pass_pixel_coords']
@@ -1196,34 +1241,10 @@ class Raster(object):
             wkt_strings = [wkt_strings]
 
         # list of geometry indices and OGR SWIG geometry objects
-        # each dict entry contains   internal_id : (geom_id, geom)
-        id_geom_dict = dict()
-        geom_types = []
-
-        for wkt_string_indx, wkt_string in enumerate(range(len(wkt_strings))):
-            # multi geometry should be separated
-            if multi_geom_separate:
-                if ('MULTI' in wkt_string) or ('multi' in wkt_string):
-
-                    # if multi geometry should be separated then add M prefix to index and
-                    # add another index of the geometry after underscore
-                    multi_geom = ogr.CreateGeometryFromWkt(wkt_string)
-
-                    for multi_geom_indx in range(multi_geom.GetGeometryCount()):
-                        geom_internal_id = '{}_{}'.format(str(wkt_string_indx), str(multi_geom_indx))\
-                            if geom_id is None else '{}_{}'.format(str(geom_id[wkt_string_indx]),
-                                                                   str(multi_geom_indx))
-                        id_geom_dict[geom_internal_id] = multi_geom.GetGeometryRef(multi_geom_indx)
-
-                else:
-                    # if no multi geometry in the string
-                    id_geom_dict[str(wkt_string_indx) if geom_id is None else geom_id[wkt_string_indx]] = \
-                        ogr.CreateGeometryFromWkt(wkt_string)
-
-            else:
-                # if multi geometry should not be separated
-                id_geom_dict[str(wkt_string_indx) if geom_id is None else geom_id[wkt_string_indx]] = \
-                    ogr.CreateGeometryFromWkt(wkt_string)
+        # each dict entry contains   geom_id : geom
+        id_geom_dict = self.index_geom_wkt(wkt_strings,
+                                           geom_ids=geom_ids,
+                                           separate_multi_geom=separate_multi_geom)
 
         # make internal tiles
         self.make_tile_grid(*tile_size)
@@ -1334,28 +1355,20 @@ class Raster(object):
                         # get band values from tile array
                         out_geom_extract[geom_id]['values'] += list(tile_arr[band_order, x, y].tolist()
                                                                     for x, y in pixel_xy_loc)
-            warned = False
+
             if reducer is not None:
+                warned = False
                 for geom_id, geom_dict in out_geom_extract.items():
-                    if reducer == 'mean':
-                        geom_dict['values'] = np.mean(geom_dict['values'], axis=0).tolist()
-                        geom_dict['coordinates'] = np.mean(geom_dict['coordinates'], axis=0).tolist()
-                    elif reducer == 'median':
-                        geom_dict['values'] = np.median(geom_dict['values'], axis=0).tolist()
-                        geom_dict['coordinates'] = np.median(geom_dict['coordinates'], axis=0).tolist()
-                    elif reducer == 'min':
-                        geom_dict['values'] = np.min(geom_dict['values'], axis=0).tolist()
-                        geom_dict['coordinates'] = np.min(geom_dict['coordinates'], axis=0).tolist()
-                    elif reducer == 'max':
-                        geom_dict['values'] = np.max(geom_dict['values'], axis=0).tolist()
-                        geom_dict['coordinates'] = np.max(geom_dict['coordinates'], axis=0).tolist()
-                    elif 'percentile' in reducer:
-                        pctl = int(reducer.split('_')[1])
-                        geom_dict['values'] = np.percentile(geom_dict['values'], [pctl], axis=0).tolist()
-                        geom_dict['coordinates'] = np.percentile(geom_dict['coordinates'], [pctl], axis=0).tolist()
-                    else:
+                    try:
+                        geom_dict['values'] = Sublist.reduce(geom_dict['values'],
+                                                             method=reducer,
+                                                             axis=0).tolist()
+                        geom_dict['coordinates'] = Sublist.reduce(geom_dict['coordinates'],
+                                                                  method=reducer,
+                                                                  axis=0).tolist()
+                    except Exception as e:
                         if not warned:
-                            warnings.warn('reducer = {} is not implemented'.format(reducer))
+                            warnings.warn(e.args[0] + '\nNot reducing.'.format(reducer))
                             warned = True
 
                     out_geom_extract[geom_id] = geom_dict
