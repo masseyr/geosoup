@@ -5,10 +5,50 @@ import warnings
 import numpy as np
 from osgeo import ogr, osr, gdal, gdal_array
 from geosoup.common import Handler, Sublist, Opt
-from geosoup.gdaldefs import OGR_FIELD_DEF, OGR_GEOM_DEF, OGR_TYPE_DEF
 
 
-__all__ = ['Vector']
+__all__ = ['Vector',
+           'OGR_FIELD_DEF',
+           'OGR_TYPE_DEF',
+           'OGR_GEOM_DEF',
+           'OGR_FIELD_DEF_INV']
+
+
+OGR_FIELD_DEF = {
+    'int': ogr.OFTInteger,
+    'long': ogr.OFTInteger,
+    'float': ogr.OFTReal,
+    'double': ogr.OFTReal,
+    'str': ogr.OFTString,
+    'bool': ogr.OFTInteger,
+    'nonetype': ogr.OFSTNone,
+    'none': ogr.OFSTNone
+}
+
+OGR_FIELD_DEF_INV = dict(list((v, k) for k, v in OGR_FIELD_DEF.items()))
+
+OGR_TYPE_DEF = {
+            'point': 1,
+            'line': 2,
+            'linestring': 2,
+            'polygon': 3,
+            'multipoint': 4,
+            'multilinestring': 5,
+            'multipolygon': 6,
+            'geometry': 0,
+            'no geometry': 100
+}
+
+OGR_GEOM_DEF = {
+                1: 'point',
+                2: 'line',
+                3: 'polygon',
+                4: 'multipoint',
+                5: 'multilinestring',
+                6: 'multipolygon',
+                0: 'geometry',
+                100: 'no geometry',
+}
 
 
 class Vector(object):
