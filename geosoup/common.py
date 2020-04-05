@@ -1,11 +1,14 @@
 from decimal import Decimal, getcontext
 from itertools import takewhile, repeat
+from functools import wraps
 import numpy as np
 import datetime
+import logging
 import fnmatch
 import random
 import psutil
 import ftplib
+import time
 import copy
 import gzip
 import sys
@@ -15,6 +18,8 @@ import os
 __all__ = ['Sublist',
            'Handler',
            'FTPHandler',
+           'Logger',
+           'Timer',
            'Opt']
 
 
@@ -1418,3 +1423,187 @@ class FTPHandler(Handler):
                 except Exception:
                     Opt.cprint('File {} not found or already written'.format(self.basename))
 
+
+class Logger(object):
+    """
+    Class for logging output
+    """
+
+    def __init__(self,
+                 name='default',
+                 filename=None,
+                 level='info',
+                 stream=False):
+        """
+        Instantialize logger class object
+        """
+
+        self.logger = logging.getLogger(name)
+
+        if level.lower() == 'debug':
+            self.logger.setLevel(logging.DEBUG)
+        elif level.lower() == 'info':
+            self.logger.setLevel(logging.INFO)
+        elif level.lower() == 'warn' or level.lower() == 'warning':
+            self.logger.setLevel(logging.WARNING)
+        else:
+            self.logger.setLevel(logging.ERROR)
+
+        # create a logging format
+        formatter = logging.Formatter('%(asctime)s : %(levelname)s : %(message)s')
+
+        # file handler
+        if filename is not None:
+            file_handler = logging.FileHandler(filename,
+                                               mode='w')
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+
+        # stream handler
+        if stream:
+            stream_handler = logging.StreamHandler()
+            stream_handler.setFormatter(formatter)
+            self.logger.addHandler(stream_handler)
+
+    def __repr__(self):
+        return '<Logger class object>'
+
+    def lprint(self,
+               message_str=None,
+               level='info'):
+        """
+        Method to print to logger
+        """
+
+        if level.lower() == 'info':
+            self.logger.info(message_str)
+        elif level.lower() == 'warn' or level.lower() == 'warning':
+            self.logger.warning(message_str)
+        elif level.lower() == 'error':
+            self.logger.error(message_str)
+        else:
+            self.logger.debug(message_str)
+
+    def close(self):
+        """
+        Close logger
+        """
+        handlers = self.logger.handlers[:]
+        for handler in handlers:
+            handler.close()
+            self.logger.removeHandler(handler)
+
+
+class Timer:
+    """
+    Decorator class to compute time a function takes to execute
+
+    example usage:
+
+    @Timer.timing(True)
+    def my_function(a, b, c):
+        return a + b + c
+
+    >Time it took to run my_function: 0.44 seconds
+
+    """
+    def __init__(self,
+                 func):
+        """
+        Constructor
+        :param func: Input function
+        """
+        self.func = func
+
+    def __repr__(self):
+        """
+        Object representation
+        :return: String
+        """
+        return '<Timer class for {}>'.format(self.func.__name__)
+
+    @staticmethod
+    def display_time(seconds,
+                     precision=3):
+        """
+        method to display time in human readable format
+        :param seconds: Number of seconds
+        :param precision: Decimal precision
+        :return: String
+        """
+
+        # define denominations
+        intervals = [('weeks', 604800),
+                     ('days', 86400),
+                     ('hours', 3600),
+                     ('minutes', 60),
+                     ('seconds', 1)]
+
+        # initialize list
+        result = list()
+
+        # coerce to float
+        dtype = type(seconds).__name__
+        if dtype != 'int' or dtype != 'long' or dtype != 'float':
+            try:
+                seconds = float(seconds)
+            except (TypeError, ValueError, NameError):
+                print("Type not coercible to Float")
+
+        # break denominations
+        for name, count in intervals:
+            if name != 'seconds':
+                value = seconds // count
+                if value:
+                    seconds -= value * count
+                    if value == 1:
+                        name = name.rstrip('s')
+                    value = str(int(value))
+                    result.append("{v} {n}".format(v=value,
+                                                   n=name))
+            else:
+                value = "{:.{p}f}".format(seconds,
+                                          p=precision)
+                result.append("{v} {n}".format(v=value,
+                                               n=name))
+
+        # join output
+        return ' '.join(result)
+
+    @classmethod
+    def timing(cls,
+               doit=False):
+        """
+        Function to compute timing for input function
+        :param doit: (abbr: Do it.) Keyword to determine if the wrapper returns
+                     the function with or without timing it
+        :return: Function and prints time taken
+        """
+
+        def time_it(func):
+
+            """
+            Executes wrapper
+            """
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                """
+                Wrapper for func
+                :param args: Arguments
+                :param kwargs: Key word arguments
+                :return: Function func return
+                """
+                if doit:
+                    t1 = time.time()
+                    val = func(*args, **kwargs)
+                    t2 = time.time()
+
+                    # time to run
+                    t = Timer.display_time(t2 - t1)
+
+                    sys.stdout.write("Time it took to run {}: {}\n".format(func.__name__, t))
+                    return val
+                else:
+                    return func(*args, **kwargs)
+            return wrapper
+        return time_it
