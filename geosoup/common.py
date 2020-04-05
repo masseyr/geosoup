@@ -584,25 +584,32 @@ class Sublist(list):
 
     @staticmethod
     def reduce(array,
-               method='mean'):
+               method='mean',
+               axis=0):
         """
         Method to reduce a 2D or 3D array using a specific method
         :param array: Numpy array
-        :param method: Method to use for reduction (options: mean, median, std_dev, percentile_x, default:mean
-                                                             here x is the percentile)
+        :param method: Method to use for reduction (options: mean, median, std_dev,
+                                                        percentile_xx, min, max, default:mean
+                                                             here xx is the percentile)
+        :param axis: Axis to apply the reducer along
         :return: float
         """
         if method == 'mean':
-            return np.mean(array)
+            return np.mean(array, axis=axis)
         elif method == 'median':
-            return np.median(array)
+            return np.median(array, axis=axis)
         elif method == 'std_dev':
-            return np.std(array)
+            return np.std(array, axis=axis)
+        if method == 'min':
+            return np.min(array, axis=axis)
+        if method == 'max':
+            return np.max(array, axis=axis)
         elif 'percentile' in method:
             perc = int(method.split('_')[1])
-            return np.percentile(array, perc)
+            return np.percentile(array, perc, axis=axis)
         else:
-            raise ValueError("Invalid method type\nValid types: mean, median, std_dev, percentile_x")
+            raise ValueError("Reducer = {} is not implemented".format(method))
 
 
 class Handler(object):
