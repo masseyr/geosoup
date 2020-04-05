@@ -1,6 +1,5 @@
 import numpy as np
 from geosoup.common import Handler, Opt
-from geosoup.gdaldefs import OGR_TYPE_DEF, OGR_FIELD_DEF
 import warnings
 from osgeo import gdal, gdal_array, ogr, osr, gdalconst
 np.set_printoptions(suppress=True)
@@ -10,7 +9,49 @@ gdal.UseExceptions()
 gdal.AllRegister()
 
 
-__all__ = ['Raster', 'MultiRaster']
+__all__ = ['Raster',
+           'MultiRaster',
+           'Terrain',
+           'GDAL_FIELD_DEF',
+           'GDAL_FIELD_DEF_INV']
+
+
+GDAL_FIELD_DEF = {
+    'byte': gdal.GDT_Byte,
+    'int': gdal.GDT_Int16,
+    'long': gdal.GDT_Int32,
+    'float': gdal.GDT_Float32,
+    'double': gdal.GDT_Float64,
+    'uint': gdal.GDT_UInt16,
+    'ulong': gdal.GDT_UInt32,
+}
+
+GDAL_FIELD_DEF_INV = dict(list((v, k) for k, v in GDAL_FIELD_DEF.items()))
+
+OGR_FIELD_DEF = {
+    'int': ogr.OFTInteger,
+    'long': ogr.OFTInteger,
+    'float': ogr.OFTReal,
+    'double': ogr.OFTReal,
+    'str': ogr.OFTString,
+    'bool': ogr.OFTInteger,
+    'nonetype': ogr.OFSTNone,
+    'none': ogr.OFSTNone
+}
+
+OGR_FIELD_DEF_INV = dict(list((v, k) for k, v in OGR_FIELD_DEF.items()))
+
+OGR_TYPE_DEF = {
+            'point': 1,
+            'line': 2,
+            'linestring': 2,
+            'polygon': 3,
+            'multipoint': 4,
+            'multilinestring': 5,
+            'multipolygon': 6,
+            'geometry': 0,
+            'no geometry': 100
+}
 
 
 class Raster(object):
@@ -1422,7 +1463,7 @@ class Raster(object):
                   verbose=False,
                   cutline_file=None,
                   cutline_blend=0,
-                  return_vrt=False,
+                  return_datasource=False,
                   **creation_options):
         """
         Method to reproject raster object
@@ -1441,7 +1482,7 @@ class Raster(object):
         :param verbose: If the steps should be displayed
         :param cutline_file: Shapefile, etc. to clip raster
         :param cutline_blend: blend distance in pixels
-        :param return_vrt: If VRT object should be returned instead of raster
+        :param return_datasource: If datasource object should be returned instead of raster
         :param creation_options: Creation options to be used while writing the raster
                                 (example for geotiff: 'compress=lzw' , 'bigtiff=yes' )
         :return: VRT object or None (if output file is also specified)
@@ -1450,75 +1491,77 @@ class Raster(object):
         https://gdal.org/python/osgeo.gdal-module.html#WarpOptions
         """
 
-        vrt_dict = dict()
+        warp_dict = dict()
 
         if output_bounds is not None:
-            vrt_dict['outputBounds'] = output_bounds
+            warp_dict['outputBounds'] = output_bounds
 
         if output_res is not None:
-            vrt_dict['xRes'] = output_res[0]
-            vrt_dict['yRes'] = output_res[1]
+            warp_dict['xRes'] = output_res[0]
+            warp_dict['yRes'] = output_res[1]
 
         if out_nodatavalue is not None:
-            vrt_dict['dstNodata'] = out_nodatavalue
+            warp_dict['dstNodata'] = out_nodatavalue
         else:
-            vrt_dict['dstNodata'] = self.nodatavalue
+            warp_dict['dstNodata'] = self.nodatavalue
 
-        vrt_dict['srcNodata'] = self.nodatavalue
+        warp_dict['srcNodata'] = self.nodatavalue
 
         if resampling is not None:
-            vrt_dict['resampleAlg'] = resampling
+            warp_dict['resampleAlg'] = resampling
         else:
-            vrt_dict['resampleAlg'] = 'near'
+            warp_dict['resampleAlg'] = 'near'
 
         if verbose:
             Opt.cprint('Outfile: {}'.format(outfile))
 
         if out_spref is not None:
-            sp = out_spref
+            spref = out_spref
         else:
-            sp = osr.SpatialReference()
+            spref = osr.SpatialReference()
 
             if out_epsg is not None:
-                res = sp.ImportFromEPSG(out_epsg)
+                res = spref.ImportFromEPSG(out_epsg)
             elif out_wkt is not None:
-                res = sp.ImportFromWkt(out_wkt)
+                res = spref.ImportFromWkt(out_wkt)
             elif out_proj4 is not None:
-                res = sp.ImportFromProj4(out_proj4)
+                res = spref.ImportFromProj4(out_proj4)
             else:
                 raise ValueError("Output Spatial reference not provided")
 
-        vrt_dict['srcSRS'] = self.crs_string
-        vrt_dict['dstSRS'] = sp.ExportToWkt()
+        warp_dict['srcSRS'] = self.crs_string
+        warp_dict['dstSRS'] = spref.ExportToWkt()
 
-        vrt_dict['outputType'] = out_datatype
-        vrt_dict['copyMetadata'] = True
-        vrt_dict['format'] = out_format
+        warp_dict['outputType'] = out_datatype
+        warp_dict['copyMetadata'] = True
+        warp_dict['format'] = out_format
 
         if cutline_file is not None:
             clip_opts = self.clip(cutline_file,
                                   cutline_blend,
                                   return_vrt_dict=True)
 
-            vrt_dict.update(clip_opts)
+            warp_dict.update(clip_opts)
 
         creation_options_list = []
         if len(creation_options) > 0:
             for key, value in creation_options.items():
-                creation_options_list.append('{}={}'.format(key.upper(),
-                                             value.upper()))
+                creation_options_list.append('{}={}'.format(str(key).upper(),
+                                                            str(value).upper()))
 
-            vrt_dict['creationOptions'] = creation_options_list
+            warp_dict['creationOptions'] = creation_options_list
 
-        vrt_opt = gdal.WarpOptions(**vrt_dict)
+        warp_opts = gdal.WarpOptions(**warp_dict)
 
         if outfile is None:
             outfile = Handler(self.name).dirname + Handler().sep + '_reproject.tif'
 
-        vrt_ds = gdal.Warp(outfile, self.name, options=vrt_opt)
+        warp_datasource = gdal.Warp(outfile,
+                                    self.name,
+                                    options=warp_opts)
 
-        if return_vrt:
-            return vrt_ds
+        if return_datasource:
+            return warp_datasource
         else:
             vrt_ds = None
 
@@ -1806,6 +1849,7 @@ class MultiRaster:
                blend_pixels=10,
                blend_cutline=None,
                add_overviews=False,
+               return_datasource=False,
                **kwargs):
         """
         Method to mosaic rasters in a given order
@@ -1820,15 +1864,11 @@ class MultiRaster:
         :param blend_cutline: vector file (shapefile) in memory or on disk
                               to use for blending
         :param add_overviews: If overviews should be added to the resulting image
+        :param return_datasource: If datasource of the mosaic output should be returned
         :param kwargs: Other options
-
+                       valid warp options in kwargs :
+                       https://gdal.org/python/osgeo.gdal-module.html#WarpOptions
         :return: None
-
-        todo: 1) band selection
-              2) blending options: image bounds buffered at intersection with other image
-
-        valid warp options in kwargs :
-         https://gdal.org/python/osgeo.gdal-module.html#WarpOptions
         """
 
         if order is None:
@@ -1895,9 +1935,11 @@ class MultiRaster:
         if 'bigtiff' in kwargs:
             warp_dict['creationOptions'].append('BIGTIFF={}'.format(str(kwargs['bigtiff']).upper()))
 
-        _warp_opts_ = gdal.WarpOptions(**warp_dict)
+        warp_opts = gdal.WarpOptions(**warp_dict)
 
-        gdal.Warp(outfile, self.filelist, options=_warp_opts_)
+        warp_datasource = gdal.Warp(outfile,
+                                    self.filelist,
+                                    options=warp_opts)
 
         if add_overviews:
             ras = Raster(outfile)
@@ -1905,6 +1947,9 @@ class MultiRaster:
                 ras.add_overviews(overviews=add_overviews)
             else:
                 ras.add_overviews()
+
+        if return_datasource:
+            return warp_datasource
 
 
 class Terrain(Raster):
