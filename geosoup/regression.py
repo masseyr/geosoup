@@ -16,18 +16,6 @@ __all__ = ['HRFRegressor',
            'RFRegressor',
            'MRegressor']
 
-__defaults__ = {
-    'tile_size': 512,
-    'n_tile_max': 5,
-    'uncert_dict': None,
-    'array_additive': 0.,
-    'array_multiplier': 1.,
-    'nodatavalue': None,
-    'out_nodatavalue': None,
-    'mask_band': None
-}
-
-
 sep = Handler().sep
 
 
@@ -36,6 +24,17 @@ class _Regressor(object):
     Regressor base class
     """
     time_it = False
+
+    defaults = {
+        'tile_size': 512,
+        'n_tile_max': 5,
+        'uncert_dict': None,
+        'array_additive': 0.,
+        'array_multiplier': 1.,
+        'nodatavalue': None,
+        'out_nodatavalue': None,
+        'mask_band': None
+    }
 
     def __init__(self,
                  data=None,
@@ -159,7 +158,7 @@ class _Regressor(object):
         if not raster_obj.init:
             raster_obj.initialize()
 
-        defaults = Opt.__copy__(__defaults__)
+        defaults = Opt.__copy__(_Regressor.defaults)
 
         nbands = raster_obj.shape[0]
         nrows = raster_obj.shape[1]
@@ -1123,7 +1122,7 @@ class RFRegressor(_Regressor):
         if not type(arr) == np.ndarray:
             arr = np.array(arr)
 
-        defaults = Opt.__copy__(__defaults__)
+        defaults = Opt.__copy__(self.defaults)
         defaults.update(kwargs)
 
         uncert_dict = defaults['uncert_dict']
