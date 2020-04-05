@@ -14,8 +14,7 @@ from geosoup.common import Timer
 
 __all__ = ['HRFRegressor',
            'RFRegressor',
-           'MRegressor',
-           '_Regressor']
+           'MRegressor']
 
 __defaults__ = {
     'tile_size': 512,
