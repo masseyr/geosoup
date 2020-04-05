@@ -9,7 +9,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from geosoup.common import Handler, Opt
 from geosoup.raster import Raster
-from geosoup.timer import Timer
+from geosoup.common import Timer
 
 
 __all__ = ['HRFRegressor',
