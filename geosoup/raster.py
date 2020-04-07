@@ -1,6 +1,7 @@
 import numpy as np
 from geosoup.common import Handler, Opt, Sublist
 import warnings
+import json
 from osgeo import gdal, gdal_array, ogr, osr, gdalconst
 np.set_printoptions(suppress=True)
 
@@ -1653,14 +1654,17 @@ class MultiRaster:
 
             temp_geom = multi_geom.UnionCascaded()
 
-        temp_geom_wkt = temp_geom.ExportToWkt()
+        temp_geom_json = temp_geom.ExportToJson()
+        json_str = json.loads(temp_geom_json)
 
-        temp_coords = list(list(float(elem.strip()) for elem in elem_.strip()
-                                                                     .split(' '))
-                           for elem_ in temp_geom_wkt.replace('POLYGON', '')
-                                                     .replace('((', '')
-                                                     .replace('))', '')
-                                                     .split(','))
+        temp_coords = []
+        for level1_list in json_str['coordinates']:
+            for level2_list in level1_list:
+                if json_str['type'] == 'Polygon':
+                    temp_coords.append(level2_list)
+                elif json_str['type'] == 'MultiPolygon':
+                    for level3_list in level2_list:
+                        temp_coords.append(level3_list)
 
         minx = min(list(coord[0] for coord in temp_coords))
         miny = min(list(coord[1] for coord in temp_coords))
@@ -1735,6 +1739,15 @@ class MultiRaster:
         vrt_dict['outputBounds'] = self.get_extent(index=order)
         vrt_dict['separate'] = True
         vrt_dict['hideNodata'] = False
+
+        vrt_dict['creationOptions'] = []
+
+        if 'compress' in kwargs:
+            vrt_dict['creationOptions'].append('COMPRESS={}'.format(str(kwargs['compress']).upper()))
+
+        if 'bigtiff' in kwargs:
+            vrt_dict['creationOptions'].append('BIGTIFF={}'.format(str(kwargs['bigtiff']).upper()))
+
 
         if verbose:
             Opt.cprint('Files: \n{}'.format('\n'.join(list(self.filelist[i] for i in order))))
@@ -1942,6 +1955,8 @@ class MultiRaster:
             warp_dict['cutlineLayer'] = blend_layer_name
             warp_dict['cutlineBlend'] = blend_pixels
 
+        warp_dict['creationOptions'] = []
+
         if 'compress' in kwargs:
             warp_dict['creationOptions'].append('COMPRESS={}'.format(str(kwargs['compress']).upper()))
 
@@ -2021,6 +2036,10 @@ class Terrain(Raster):
         if not self.init:
             self.initialize()
 
+        if outfile is None:
+            outfile = Handler(self.name).add_to_filename('_SLOPE')
+            outfile = Handler(outfile).file_remove_check()
+
         creation_option_list = list()
         for key, value in creation_options.items():
             creation_option_list.append('{}={}'.format(str(key).upper(), str(value).upper()))
@@ -2074,6 +2093,10 @@ class Terrain(Raster):
         if not self.init:
             self.initialize()
 
+        if outfile is None:
+            outfile = Handler(self.name).add_to_filename('_ASPECT')
+            outfile = Handler(outfile).file_remove_check()
+
         creation_option_list = list()
         for key, value in creation_options.items():
             creation_option_list.append('{}={}'.format(str(key), str(value)))
@@ -2122,6 +2145,10 @@ class Terrain(Raster):
         if not self.init:
             self.initialize()
 
+        if outfile is None:
+            outfile = Handler(self.name).add_to_filename('_TPI')
+            outfile = Handler(outfile).file_remove_check()
+
         creation_option_list = list()
         for key, value in creation_options.items():
             creation_option_list.append('{}={}'.format(str(key), str(value)))
@@ -2168,6 +2195,10 @@ class Terrain(Raster):
         if not self.init:
             self.initialize()
 
+        if outfile is None:
+            outfile = Handler(self.name).add_to_filename('_TRI')
+            outfile = Handler(outfile).file_remove_check()
+
         creation_option_list = list()
         for key, value in creation_options.items():
             creation_option_list.append('{}={}'.format(str(key), str(value)))
@@ -2213,6 +2244,10 @@ class Terrain(Raster):
         """
         if not self.init:
             self.initialize()
+
+        if outfile is None:
+            outfile = Handler(self.name).add_to_filename('_ROUGHNESS')
+            outfile = Handler(outfile).file_remove_check()
 
         creation_option_list = list()
         for key, value in creation_options.items():
@@ -2277,6 +2312,10 @@ class Terrain(Raster):
         """
         if not self.init:
             self.initialize()
+
+        if outfile is None:
+            outfile = Handler(self.name).add_to_filename('_HILLSHADE')
+            outfile = Handler(outfile).file_remove_check()
 
         creation_option_list = list()
         for key, value in creation_options.items():
