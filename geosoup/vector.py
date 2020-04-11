@@ -2,9 +2,8 @@ import math
 import sys
 import os
 import warnings
-import numpy as np
 from osgeo import ogr, osr, gdal, gdal_array
-from geosoup.common import Handler, Sublist, Opt
+from geosoup.common import Handler, Sublist, Opt, np
 
 
 __all__ = ['Vector',
@@ -100,12 +99,15 @@ class Vector(object):
         self.fields = list()
         self.data = dict()
         self.attr_def = attr_def
+        self.bounds = None
 
         if filename is not None and os.path.isfile(filename):
 
             # open vector file
             self.datasource = ogr.Open(self.filename)
             file_layer = self.datasource.GetLayerByIndex(layer_index)
+
+            self.bounds = file_layer.GetExtent()
 
             if in_memory:
                 out_driver = ogr.GetDriverByName('Memory')
