@@ -7,6 +7,7 @@ import logging
 import fnmatch
 import random
 import psutil
+import shutil
 import ftplib
 import time
 import copy
@@ -721,7 +722,8 @@ class Handler(object):
             # print('Deleting file...')
             try:
                 os.remove(self.filename)
-            except OSError:
+            except Exception as e:
+                print(e)
                 components = self.basename.split('.')
                 if len(components) < 2:
                     self.filename = self.dirname + os.path.sep + self.basename + '_' + str(counter)
@@ -752,6 +754,40 @@ class Handler(object):
         """
         if self.file_exists():
             os.remove(self.filename)
+
+    def copy_file(self,
+                  other_dir,
+                  replace=True,
+                  move=False):
+        """
+        Copy a file from one location to another
+        :param other_dir: Name of output directory
+        :param replace: If the existing output file should be replaced?
+        :param move: If the file should be moved instead of copy
+        """
+        if other_dir[-1] == '/':
+            out_filename = other_dir + self.basename
+        else:
+            out_filename = other_dir + self.sep + self.basename
+
+        if replace:
+            out_filename = Handler(out_filename).file_remove_check()
+
+        shutil.copy(self.filename,
+                    out_filename)
+
+        if move:
+            self.file_delete()
+
+    def copy_dir(self,
+                 other_dir):
+
+        """
+        Method to copy a directory to another
+        :param other_dir: Name of output directory
+        """
+        shutil.copytree(self.dirname,
+                        other_dir)
 
     def file_lines(self,
                    nlines=True,
