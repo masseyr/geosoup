@@ -1,14 +1,12 @@
 import pickle
 import warnings
-import numpy as np
 from scipy import stats
 from math import sqrt
-from osgeo import gdal, gdal_array
 from sklearn import linear_model
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from geosoup.common import Handler, Opt
-from geosoup.raster import Raster
+from geosoup.raster import Raster, np, gdal_array, gdal
 from geosoup.common import Timer
 
 
