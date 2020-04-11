@@ -1,6 +1,5 @@
-import numpy as np
 from scipy import stats, linalg
-from geosoup.common import Handler, Opt
+from geosoup.common import Handler, Opt, np
 import warnings
 
 
