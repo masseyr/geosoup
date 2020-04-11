@@ -228,7 +228,7 @@ class Raster(object):
                     try:
                         overviews_.append(int(elem))
                     except Exception as e:
-                        Opt.cprint('Conversion error: {} -for- {}'.format(e.args[0], elem))
+                        Opt.cprint('Conversion error: {} -for- {}'.format(e.args[1], elem))
 
                 overviews = overviews_
 
@@ -1617,10 +1617,12 @@ class MultiRaster:
     def get_extent(self,
                    index=None,
                    intersection=True,
+                   verbose=False,
                    _return=True):
         """
         Method to get intersecting bounds of the raster objects
         :param index: list of indices of raster files/objects
+        :param verbose: If some of the steps should be displayed
         :param intersection: If intersection (True) should be returned or union (False) (Default: True)
         :param _return: Should the method return the bound coordinates
         :return: coordinates of intersection (minx, miny, maxx, maxy)
@@ -1647,12 +1649,10 @@ class MultiRaster:
             for geom in geoms[1:]:
                 temp_geom = temp_geom.Intersection(geom)
         else:
-            multi_geom = ogr.Geometry(ogr.wkbMultiPolygon)
+            temp_geom = ogr.Geometry(ogr.wkbMultiPolygon)
 
             for geom in geoms:
-                multi_geom.AddGeometryDirectly(geom)
-
-            temp_geom = multi_geom.UnionCascaded()
+                temp_geom.AddGeometryDirectly(geom)
 
         temp_geom_json = temp_geom.ExportToJson()
         json_str = json.loads(temp_geom_json)
@@ -1665,6 +1665,8 @@ class MultiRaster:
                 elif json_str['type'] == 'MultiPolygon':
                     for level3_list in level2_list:
                         temp_coords.append(level3_list)
+                else:
+                    temp_coords.append(None)
 
         minx = min(list(coord[0] for coord in temp_coords))
         miny = min(list(coord[1] for coord in temp_coords))
@@ -1673,6 +1675,11 @@ class MultiRaster:
         maxy = max(list(coord[1] for coord in temp_coords))
 
         self.intersection = (minx, miny, maxx, maxy)
+
+        if verbose:
+            Opt.cprint('xmin: {}, ymin: {}, xmax: {}, ymax: {}'.format(*[str(elem)
+                                                                         for elem in
+                                                                         self.intersection]))
 
         if _return:
             return self.intersection
@@ -1895,6 +1902,47 @@ class MultiRaster:
                        valid warp options in kwargs :
                        https://gdal.org/python/osgeo.gdal-module.html#WarpOptions
         :return: None
+
+        todo: 1) band selection
+         Use VRT to get bands that will be used at runtime
+          2) blending options: image bounds buffered at intersection with other image
+          using:
+            from scipy.ndimage.morphology import binary_erosion
+            from scipy.spatial.distance import cdist
+            def dist_from_edge(img):
+                I = binary_erosion(img) # Interior mask
+                C = img - I             # Contour mask
+                out = C.astype(int)     # Setup o/p and assign cityblock distances
+                out[I] = cdist(np.argwhere(C), np.argwhere(I), 'cityblock').min(0) + 1
+                return out
+                OR
+                import numpy as np
+                from scipy.ndimage import distance_transform_cdt
+                def distance_from_edge(x):
+                    x = np.pad(x, 1, mode='constant')
+                    dist = distance_transform_cdt(x, metric='taxicab')
+                    return dist[1:-1, 1:-1]
+                OR
+                import numpy as np
+                from scipy.spatial.distance import cdist
+                def feature_dist(input):
+                    # Takes a labeled array as returned by scipy.ndimage.label and
+                    # returns an intra-feature distance matrix.
+                    I, J = np.nonzero(input)
+                    labels = input[I,J]
+                    coords = np.column_stack((I,J))
+                    sorter = np.argsort(labels)
+                    labels = labels[sorter]
+                    coords = coords[sorter]
+                    sq_dists = cdist(coords, coords, 'sqeuclidean')
+                    start_idx = np.flatnonzero(np.r_[1, np.diff(labels)])
+                    nonzero_vs_feat = np.minimum.reduceat(sq_dists, start_idx, axis=1)
+                    feat_vs_feat = np.minimum.reduceat(nonzero_vs_feat, start_idx, axis=0)
+                    return np.sqrt(feat_vs_feat)
+                    This approach requires O(N2) memory,
+                    where N is the number of nonzero pixels.
+                    If this is too demanding,
+                    you could "de-vectorize" it along one axis (add a for-loop).
         """
 
         if order is None:
@@ -1942,6 +1990,7 @@ class MultiRaster:
             Opt.cprint('Getting bounds ...')
 
         warp_dict['outputBounds'] = self.get_extent(index=order,
+                                                    verbose=verbose,
                                                     intersection=False)
         warp_dict['targetAlignedPixels'] = True
         warp_dict['outputType'] = self.rasters[0].dtype
@@ -1978,364 +2027,4 @@ class MultiRaster:
 
         if return_datasource:
             return warp_datasource
-
-
-class Terrain(Raster):
-    """Class to process DEM rasters"""
-
-    def __init__(self,
-                 name,
-                 array=None,
-                 bnames=None,
-                 metadict=None,
-                 dtype=None,
-                 shape=None,
-                 transform=None,
-                 crs_string=None):
-
-        super(Terrain, self).__init__(name,
-                                      array,
-                                      bnames,
-                                      metadict,
-                                      dtype,
-                                      shape,
-                                      transform,
-                                      crs_string)
-
-    def __repr__(self):
-        return 'Terrain: ' + super(Terrain, self).__repr__()
-
-    def slope(self,
-              outfile=None,
-              slope_format='degree',
-              file_format='GTiff',
-              compute_edges=True,
-              band=1,
-              scale=None,
-              algorithm='ZevenbergenThorne',
-              **creation_options):
-
-        """
-        Method to calculate slope
-        :param outfile: output file name
-        :param slope_format: format of the slope raster (valid options: 'degree', or 'percent')
-        :param file_format: Output file format (default: 'GTiff')
-        :param compute_edges: If the edges of the raster should be computed as well.
-                              This can present incomplete results at the edges and resulting
-                              rasters may show edge effects on mosaicking
-        :param band: Band index to use (default: 0)
-        :param scale: ratio of vertical to horizontal units
-        :param algorithm: slope algorithm to use
-                          valid options:
-                             4-neighbor: 'ZevenbergenThorne'
-                             8-neighbor: 'Horn'
-        :param creation_options: Valid creation options examples:
-                                 compress='LZW'
-                                 bigtiff='yes'
-        """
-        if not self.init:
-            self.initialize()
-
-        if outfile is None:
-            outfile = Handler(self.name).add_to_filename('_SLOPE')
-            outfile = Handler(outfile).file_remove_check()
-
-        creation_option_list = list()
-        for key, value in creation_options.items():
-            creation_option_list.append('{}={}'.format(str(key).upper(), str(value).upper()))
-
-        slope_opts = gdal.DEMProcessingOptions(format=file_format,
-                                               computeEdges=compute_edges,
-                                               alg=algorithm,
-                                               slopeFormat=slope_format,
-                                               band=band,
-                                               scale=scale,
-                                               creationOptions=creation_option_list)
-
-        res = gdal.DEMProcessing(outfile,
-                                 self.datasource,
-                                 'slope',
-                                 options=slope_opts)
-        res = None
-
-    def aspect(self,
-               outfile=None,
-               file_format='GTiff',
-               compute_edges=True,
-               band=1,
-               scale=None,
-               algorithm='ZevenbergenThorne',
-               zero_for_flat=True,
-               trigonometric=False,
-               **creation_options):
-
-        """
-        Method to calculate aspect
-        :param outfile: output file name
-        :param file_format: Output file format (default: 'GTiff')
-        :param compute_edges: If the edges of the raster should be computed as well.
-                              This can present incomplete results at the edges and resulting
-                              rasters may show edge effects on mosaicking
-        :param band: Band index to use (default: 0)
-        :param scale: ratio of vertical to horizontal units
-        :param algorithm: slope algorithm to use
-                          valid options:
-                             4-neighbor: 'ZevenbergenThorne'
-                             8-neighbor: 'Horn'
-                             
-        :param zero_for_flat: whether to return 0 for flat areas with slope=0, instead of -9999.
-        :param trigonometric: whether to return trigonometric angle instead of azimuth.
-                             Here 0deg will mean East, 90deg North, 180deg West, 270deg South.
-        :param creation_options: Valid creation options examples:
-                                 compress='LZW'
-                                 bigtiff='yes'
-        """
-        if not self.init:
-            self.initialize()
-
-        if outfile is None:
-            outfile = Handler(self.name).add_to_filename('_ASPECT')
-            outfile = Handler(outfile).file_remove_check()
-
-        creation_option_list = list()
-        for key, value in creation_options.items():
-            creation_option_list.append('{}={}'.format(str(key), str(value)))
-
-        aspect_opts = gdal.DEMProcessingOptions(format=file_format,
-                                                computeEdges=compute_edges,
-                                                creationOptions=creation_option_list,
-                                                alg=algorithm,
-                                                band=band,
-                                                scale=scale,
-                                                zeroForFlat=zero_for_flat,
-                                                trigonometric=trigonometric)
-
-        res = gdal.DEMProcessing(outfile,
-                                 self.datasource,
-                                 'aspect',
-                                 options=aspect_opts)
-        res = None
-
-    def tpi(self,
-            outfile=None,
-            file_format='GTiff',
-            compute_edges=True,
-            band=1,
-            scale=None,
-            algorithm='Horn',
-            **creation_options):
-
-        """
-        Method to calculate topographic position index
-        :param outfile: output file name
-        :param file_format: Output file format (default: 'GTiff')
-        :param compute_edges: If the edges of the raster should be computed as well.
-                              This can present incomplete results at the edges and resulting
-                              rasters may show edge effects on mosaicking
-        :param band: Band index to use (default: 0)
-        :param scale: ratio of vertical to horizontal units
-        :param algorithm: slope algorithm to use
-                          valid options:
-                             4-neighbor: 'ZevenbergenThorne'
-                             8-neighbor: 'Horn'
-        :param creation_options: Valid creation options examples:
-                                 compress='LZW'
-                                 bigtiff='yes'
-        """
-        if not self.init:
-            self.initialize()
-
-        if outfile is None:
-            outfile = Handler(self.name).add_to_filename('_TPI')
-            outfile = Handler(outfile).file_remove_check()
-
-        creation_option_list = list()
-        for key, value in creation_options.items():
-            creation_option_list.append('{}={}'.format(str(key), str(value)))
-
-        tpi_opts = gdal.DEMProcessingOptions(format=file_format,
-                                             computeEdges=compute_edges,
-                                             creationOptions=creation_option_list,
-                                             band=band,
-                                             scale=scale,
-                                             alg=algorithm)
-
-        res = gdal.DEMProcessing(outfile,
-                                 self.datasource,
-                                 'TPI',
-                                 options=tpi_opts)
-        res = None
-
-    def tri(self,
-            outfile=None,
-            file_format='GTiff',
-            compute_edges=True,
-            band=1,
-            scale=None,
-            algorithm='Horn',
-            **creation_options):
-
-        """
-        Method to calculate topographic roughness index
-        :param outfile: output file name
-        :param file_format: Output file format (default: 'GTiff')
-        :param compute_edges: If the edges of the raster should be computed as well.
-                              This can present incomplete results at the edges and resulting
-                              rasters may show edge effects on mosaicking
-        :param band: Band index to use (default: 0)
-        :param scale: ratio of vertical to horizontal units
-        :param algorithm: slope algorithm to use
-                          valid options:
-                             4-neighbor: 'ZevenbergenThorne'
-                             8-neighbor: 'Horn'
-        :param creation_options: Valid creation options examples:
-                                 compress='LZW'
-                                 bigtiff='yes'
-        """
-        if not self.init:
-            self.initialize()
-
-        if outfile is None:
-            outfile = Handler(self.name).add_to_filename('_TRI')
-            outfile = Handler(outfile).file_remove_check()
-
-        creation_option_list = list()
-        for key, value in creation_options.items():
-            creation_option_list.append('{}={}'.format(str(key), str(value)))
-
-        tpi_opts = gdal.DEMProcessingOptions(format=file_format,
-                                             computeEdges=compute_edges,
-                                             creationOptions=creation_option_list,
-                                             band=band,
-                                             scale=scale,
-                                             alg=algorithm)
-
-        res = gdal.DEMProcessing(outfile,
-                                 self.datasource,
-                                 'TRI',
-                                 options=tpi_opts)
-        res = None
-
-    def roughness(self,
-                  outfile=None,
-                  file_format='GTiff',
-                  compute_edges=True,
-                  band=1,
-                  scale=None,
-                  algorithm='ZevenbergenThorne',
-                  **creation_options):
-
-        """
-        Method to calculate DEM roughness
-        :param outfile: output file name
-        :param file_format: Output file format (default: 'GTiff')
-        :param compute_edges: If the edges of the raster should be computed as well.
-                              This can present incomplete results at the edges and resulting
-                              rasters may show edge effects on mosaicking
-        :param band: Band index to use (default: 0)
-        :param scale: ratio of vertical to horizontal units
-        :param algorithm: slope algorithm to use
-                          valid options:
-                             4-neighbor: 'ZevenbergenThorne'
-                             8-neighbor: 'Horn'
-        :param creation_options: Valid creation options examples:
-                                 compress='LZW'
-                                 bigtiff='yes'
-        """
-        if not self.init:
-            self.initialize()
-
-        if outfile is None:
-            outfile = Handler(self.name).add_to_filename('_ROUGHNESS')
-            outfile = Handler(outfile).file_remove_check()
-
-        creation_option_list = list()
-        for key, value in creation_options.items():
-            creation_option_list.append('{}={}'.format(str(key), str(value)))
-
-        tpi_opts = gdal.DEMProcessingOptions(format=file_format,
-                                             computeEdges=compute_edges,
-                                             creationOptions=creation_option_list,
-                                             band=band,
-                                             scale=scale,
-                                             alg=algorithm)
-
-        res = gdal.DEMProcessing(outfile,
-                                 self.datasource,
-                                 'Roughness',
-                                 options=tpi_opts)
-        res = None
-
-    def hillshade(self,
-                  outfile=None,
-                  file_format='GTiff',
-                  compute_edges=True,
-                  band=1,
-                  scale=None,
-                  algorithm='ZevenbergenThorne',
-                  z_factor=1,
-                  azimuth=315,
-                  altitude=90,
-                  combined=False,
-                  multi_directional=False,
-                  **creation_options):
-
-        """
-        Method to calculate DEM hillshade raster
-        :param outfile: output file name
-        :param file_format: Output file format (default: 'GTiff')
-        :param compute_edges: If the edges of the raster should be computed as well.
-                              This can present incomplete results at the edges and resulting
-                              rasters may show edge effects on mosaicking
-        :param band: Band index to use (default: 0)
-        :param scale: ratio of vertical to horizontal units
-        :param algorithm: slope algorithm to use
-                          valid options:
-                             4-neighbor: 'ZevenbergenThorne'
-                             8-neighbor: 'Horn'
-
-        :param z_factor: vertical exaggeration used to pre-multiply the elevations. (default: 1)
-        :param azimuth:  azimuth of the light, in degrees. (default: 315)
-                         0 if it comes from the top of the raster, 90 from the east and so on.
-                         The default value, 315, should rarely be changed
-                         as it is the value generally used to generate shaded maps.
-
-        :param altitude: altitude of the light, in degrees. (default: 90)
-                         90 if the light comes from above the DEM, 0 if it is raking light.
-        :param combined:  whether to compute combined shading,
-                         a combination of slope and oblique shading. (Default: False)
-        :param multi_directional: whether to compute multi-directional shading (Default: False)
-
-        :param creation_options: Valid creation options examples:
-                                 compress='LZW'
-                                 bigtiff='yes'
-        """
-        if not self.init:
-            self.initialize()
-
-        if outfile is None:
-            outfile = Handler(self.name).add_to_filename('_HILLSHADE')
-            outfile = Handler(outfile).file_remove_check()
-
-        creation_option_list = list()
-        for key, value in creation_options.items():
-            creation_option_list.append('{}={}'.format(str(key), str(value)))
-
-        tpi_opts = gdal.DEMProcessingOptions(format=file_format,
-                                             computeEdges=compute_edges,
-                                             creationOptions=creation_option_list,
-                                             band=band,
-                                             scale=scale,
-                                             alg=algorithm,
-                                             zFactor=z_factor,
-                                             azimuth=azimuth,
-                                             altitude=altitude,
-                                             combined=combined,
-                                             multiDirectional=multi_directional)
-
-        res = gdal.DEMProcessing(outfile,
-                                 self.datasource,
-                                 'hillshade',
-                                 options=tpi_opts)
-        res = None
 
