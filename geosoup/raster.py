@@ -1902,47 +1902,6 @@ class MultiRaster:
                        valid warp options in kwargs :
                        https://gdal.org/python/osgeo.gdal-module.html#WarpOptions
         :return: None
-
-        todo: 1) band selection
-         Use VRT to get bands that will be used at runtime
-          2) blending options: image bounds buffered at intersection with other image
-          using:
-            from scipy.ndimage.morphology import binary_erosion
-            from scipy.spatial.distance import cdist
-            def dist_from_edge(img):
-                I = binary_erosion(img) # Interior mask
-                C = img - I             # Contour mask
-                out = C.astype(int)     # Setup o/p and assign cityblock distances
-                out[I] = cdist(np.argwhere(C), np.argwhere(I), 'cityblock').min(0) + 1
-                return out
-                OR
-                import numpy as np
-                from scipy.ndimage import distance_transform_cdt
-                def distance_from_edge(x):
-                    x = np.pad(x, 1, mode='constant')
-                    dist = distance_transform_cdt(x, metric='taxicab')
-                    return dist[1:-1, 1:-1]
-                OR
-                import numpy as np
-                from scipy.spatial.distance import cdist
-                def feature_dist(input):
-                    # Takes a labeled array as returned by scipy.ndimage.label and
-                    # returns an intra-feature distance matrix.
-                    I, J = np.nonzero(input)
-                    labels = input[I,J]
-                    coords = np.column_stack((I,J))
-                    sorter = np.argsort(labels)
-                    labels = labels[sorter]
-                    coords = coords[sorter]
-                    sq_dists = cdist(coords, coords, 'sqeuclidean')
-                    start_idx = np.flatnonzero(np.r_[1, np.diff(labels)])
-                    nonzero_vs_feat = np.minimum.reduceat(sq_dists, start_idx, axis=1)
-                    feat_vs_feat = np.minimum.reduceat(nonzero_vs_feat, start_idx, axis=0)
-                    return np.sqrt(feat_vs_feat)
-                    This approach requires O(N2) memory,
-                    where N is the number of nonzero pixels.
-                    If this is too demanding,
-                    you could "de-vectorize" it along one axis (add a for-loop).
         """
 
         if order is None:
