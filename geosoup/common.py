@@ -132,6 +132,17 @@ class Sublist(list):
         except (TypeError, KeyError):
             print("List index not a number or list of numbers")
 
+    def flatten(self):
+        """
+        Flatten a Sublist object
+        returns: 1D Sublist object
+        """
+        if len(self) == 0:
+            return self
+        if isinstance(self, list):
+            return Sublist(self[0]).flatten() + Sublist(self[1:]).flatten()
+        return self[:1] + Sublist(self[1:]).flatten()
+
     def range(self,
               llim,
               ulim,
