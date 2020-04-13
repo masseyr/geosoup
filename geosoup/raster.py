@@ -12,7 +12,6 @@ gdal.AllRegister()
 
 __all__ = ['Raster',
            'MultiRaster',
-           'Terrain',
            'GDAL_FIELD_DEF',
            'GDAL_FIELD_DEF_INV']
 
@@ -98,6 +97,112 @@ class Raster(object):
                                                              nd=str(self.nodatavalue))
         else:
             return "<raster with path {ras}>".format(ras=self.name,)
+
+    def initialize(self,
+                   get_array=False,
+                   band_order=None,
+                   finite_only=True,
+                   nan_replacement=0.0,
+                   verbose=False):
+
+        """
+        Initialize a raster object from a file
+        :param get_array: flag to include raster as 3 dimensional array (bool)
+        :param band_order: band location list of integers (starting at 0; ignored if get_array is False)
+        :param finite_only: flag to remove non-finite values from array (ignored if get_array is False)
+        :param nan_replacement: replacement for all non-finite replacements
+        :param verbose: If some steps should be displayed
+        (ignored if finite_only, get_array is false)
+        :return None
+        """
+        self.init = True
+
+        raster_name = self.name
+
+        if Handler(raster_name).file_exists() or 'vsimem' in self.name:
+            fileptr = gdal.Open(raster_name)  # open file
+            self.datasource = fileptr
+            self.metadict = Raster.get_raster_metadict(file_name=raster_name)
+
+        elif self.datasource is not None:
+            fileptr = self.datasource
+            self.metadict = Raster.get_raster_metadict(file_ptr=fileptr)
+
+        else:
+            raise ValueError('No datasource found')
+
+        if band_order is None:
+            band_order = list(range(fileptr.RasterCount))
+        elif max(band_order) >= fileptr.RasterCount:
+            raise ValueError('Band indices must be smaller than number of available bands')
+
+        self.shape = [fileptr.RasterCount if not get_array else len(band_order),
+                      fileptr.RasterYSize,
+                      fileptr.RasterXSize]
+
+        self.dtype = fileptr.GetRasterBand(1).DataType
+        self.nodatavalue = fileptr.GetRasterBand(1).GetNoDataValue()
+
+        # if get_array flag is true
+        if get_array:
+            if verbose:
+                Opt.cprint('Reading bands: {}'.format(" ".join([str(b) for b in band_order])))
+
+            nbands = len(band_order)
+
+            # initialize array
+            if self.array_offsets is None:
+                array3d = np.zeros((nbands,
+                                    self.shape[1],
+                                    self.shape[2]),
+                                   gdal_array.GDALTypeCodeToNumericTypeCode(self.dtype))
+            else:
+                array3d = np.zeros((nbands,
+                                    self.array_offsets[3],
+                                    self.array_offsets[2]),
+                                   gdal_array.GDALTypeCodeToNumericTypeCode(self.dtype))
+
+            # get band names
+            names = list()
+
+            # read array and store the band values and name in array
+            for i, b in enumerate(band_order):
+                bandname = fileptr.GetRasterBand(b + 1).GetDescription()
+
+                if verbose:
+                    Opt.cprint('Reading band {}'.format(bandname))
+                names.append(bandname)
+
+                if self.array_offsets is None:
+                    array3d[i, :, :] = fileptr.GetRasterBand(b + 1).ReadAsArray()
+                else:
+                    array3d[i, :, :] = fileptr.GetRasterBand(b + 1).ReadAsArray(*self.array_offsets)
+
+            # if flag for finite values is present
+            if finite_only:
+                if np.isnan(array3d).any() or np.isinf(array3d).any():
+                    array3d[np.isnan(array3d)] = nan_replacement
+                    array3d[np.isinf(array3d)] = nan_replacement
+                    if verbose:
+                        Opt.cprint("Non-finite values replaced with " + str(nan_replacement))
+                else:
+                    if verbose:
+                        Opt.cprint("Non-finite values absent in file")
+
+            # assign to empty class object
+            self.array = array3d
+            self.bnames = names
+
+            self.transform = fileptr.GetGeoTransform()
+            self.crs_string = fileptr.GetProjection()
+
+        else:
+            self.bnames = list(fileptr.GetRasterBand(i + 1).GetDescription()
+                               for i in range(self.shape[0]))
+            self.transform = fileptr.GetGeoTransform()
+            self.crs_string = fileptr.GetProjection()
+
+        self.bounds = self.get_bounds()
 
     def write_to_file(self,
                       outfile=None,
@@ -333,149 +438,6 @@ class Raster(object):
                                    driver=out_format,
                                    add_overviews=add_overviews)
 
-    def initialize(self,
-                   get_array=False,
-                   band_order=None,
-                   finite_only=True,
-                   nan_replacement=0.0,
-                   use_dict=None,
-                   sensor=None,
-                   verbose=False):
-
-        """
-        Initialize a raster object from a file
-        :param get_array: flag to include raster as 3 dimensional array (bool)
-        :param band_order: band location array (int starting at 0; ignored if get_array is False)
-        :param finite_only: flag to remove non-finite values from array (ignored if get_array is False)
-        :param nan_replacement: replacement for all non-finite replacements
-        :param use_dict: Dictionary to use for renaming bands
-        :param sensor: Sensor to be used with dictionary (resources.bname_dict)
-        :param verbose: If some steps should be displayed
-        (ignored if finite_only, get_array is false)
-        :return None
-        """
-        self.init = True
-
-        raster_name = self.name
-
-        if Handler(raster_name).file_exists() or 'vsimem' in self.name:
-            fileptr = gdal.Open(raster_name)  # open file
-            self.datasource = fileptr
-            self.metadict = Raster.get_raster_metadict(file_name=raster_name)
-
-        elif self.datasource is not None:
-            fileptr = self.datasource
-            self.metadict = Raster.get_raster_metadict(file_ptr=fileptr)
-
-        else:
-            raise ValueError('No datasource found')
-
-        # get shape metadata
-        bands = fileptr.RasterCount
-        rows = fileptr.RasterYSize
-        cols = fileptr.RasterXSize
-
-        # if get_array flag is true
-        if get_array:
-
-            # get band names
-            names = list()
-
-            # band order
-            if band_order is None:
-                array3d = fileptr.ReadAsArray()
-
-                # if flag for finite values is present
-                if finite_only:
-                    if np.isnan(array3d).any() or np.isinf(array3d).any():
-                        array3d[np.isnan(array3d)] = nan_replacement
-                        array3d[np.isinf(array3d)] = nan_replacement
-                        if verbose:
-                            Opt.cprint("Non-finite values replaced with " + str(nan_replacement))
-                    else:
-                        if verbose:
-                            Opt.cprint("Non-finite values absent in file")
-
-                # get band names
-                for i in range(0, bands):
-                    names.append(fileptr.GetRasterBand(i + 1).GetDescription())
-
-            # band order present
-            else:
-                if verbose:
-                    Opt.cprint('Reading bands: {}'.format(" ".join([str(b) for b in band_order])))
-
-                bands = len(band_order)
-
-                # bands in array
-                n_array_bands = len(band_order)
-
-                # initialize array
-                if self.array_offsets is None:
-                    array3d = np.zeros((n_array_bands,
-                                        rows,
-                                        cols),
-                                       gdal_array.GDALTypeCodeToNumericTypeCode(fileptr.GetRasterBand(1).DataType))
-                else:
-                    array3d = np.zeros((n_array_bands,
-                                        self.array_offsets[3],
-                                        self.array_offsets[2]),
-                                       gdal_array.GDALTypeCodeToNumericTypeCode(fileptr.GetRasterBand(1).DataType))
-
-                # read array and store the band values and name in array
-                for i, b in enumerate(band_order):
-                    bandname = fileptr.GetRasterBand(b + 1).GetDescription()
-
-                    if verbose:
-                        Opt.cprint('Reading band {}'.format(bandname))
-
-                    if self.array_offsets is None:
-                        array3d[i, :, :] = fileptr.GetRasterBand(b + 1).ReadAsArray()
-                    else:
-                        array3d[i, :, :] = fileptr.GetRasterBand(b + 1).ReadAsArray(*self.array_offsets)
-
-                    names.append(bandname)
-
-                # if flag for finite values is present
-                if finite_only:
-                    if np.isnan(array3d).any() or np.isinf(array3d).any():
-                        array3d[np.isnan(array3d)] = nan_replacement
-                        array3d[np.isinf(array3d)] = nan_replacement
-                        if verbose:
-                            Opt.cprint("Non-finite values replaced with " + str(nan_replacement))
-                    else:
-                        if verbose:
-                            Opt.cprint("Non-finite values absent in file")
-
-            # assign to empty class object
-            self.array = array3d
-            self.bnames = names
-            self.shape = [bands, rows, cols]
-            self.transform = fileptr.GetGeoTransform()
-            self.crs_string = fileptr.GetProjection()
-            self.dtype = fileptr.GetRasterBand(1).DataType
-
-        # if get_array is false
-        else:
-            # get band names
-            names = list()
-            for i in range(0, bands):
-                names.append(fileptr.GetRasterBand(i + 1).GetDescription())
-
-            # assign to empty class object without the array
-            self.bnames = names
-            self.shape = [bands, rows, cols]
-            self.transform = fileptr.GetGeoTransform()
-            self.crs_string = fileptr.GetProjection()
-            self.dtype = fileptr.GetRasterBand(1).DataType
-            self.nodatavalue = fileptr.GetRasterBand(1).GetNoDataValue()
-
-        self.bounds = self.get_bounds()
-
-        # remap band names
-        if use_dict is not None:
-            self.bnames = [use_dict[sensor][b] for b in self.bnames]
-
     def set_nodataval(self,
                       in_nodataval=255,
                       out_nodataval=0,
@@ -664,27 +626,89 @@ class Raster(object):
 
         return meta_dict
 
-    def change_type(self,
-                    out_type='int16'):
+    def get_stats(self,
+                  verbose=False,
+                  approx=False):
+
+        """
+        Method to compute statistics of the raster object, and store as raster property
+        :param verbose: If the statistics should be printed to console
+        :param approx: If approx statistics should be calculated instead to gain speed
+        :return: None
+        """
+
+        for ib in range(self.shape[0]):
+            band = self.datasource.GetRasterBand(ib+1)
+            band.ComputeStatistics(approx)
+            band_stats = dict(zip(['min', 'max', 'mean', 'stddev'], band.GetStatistics(int(approx), 0)))
+
+            if verbose:
+                Opt.cprint('Band {} : {}'.format(self.bnames[ib],
+                                                 str(band_stats)))
+
+            self.stats[self.bnames[ib]] = band_stats
+
+    def rescale(self,
+                out_type=None,
+                rescale=False,
+                scale_vals=None,
+                scale_approx=False):
 
         """
         Method to change the raster data type
-        :param out_type: Out data type. Options: int, int8, int16, int32, int64,
-                                                float, float, float32, float64,
-                                                uint, uint8, uint16, uint32, etc.
+        :param out_type: Out data type.
+                         Valid options: byte, int, long, float, double
+                                        int8, int16, int32, int64,
+                                        float32, float64,
+                                        uint8, uint16, uint32
+        :param rescale: If the image should be rescaled
+        :param scale_vals: Tuple of min and max values for rescaling
+        :param scale_approx: If approx stats should be calculated
         :return: None
         """
+
+        if out_type is None:
+            out_type = gdal_array.GDALTypeCodeToNumericTypeCode(self.dtype)
+        else:
+            common_types = {'byte': 'uint8',
+                            'int': 'int16',
+                            'float': 'float32',
+                            'double': 'float64',
+                            'long': 'int32'}
+
+            if out_type in common_types:
+                out_type = common_types[out_type]
+
         if gdal_array.NumericTypeCodeToGDALTypeCode(np.dtype(out_type)) != self.dtype:
 
-            self.array = self.array.astype(out_type)
+            if rescale:
+                if scale_vals is not None:
+
+                    if self.stats is None:
+                        self.get_stats(approx=scale_approx)
+                    elif len(self.stats) < self.shape[0]:
+                        self.get_stats(approx=scale_approx)
+
+                    out_arr = np.zeros(self.shape, dtype=out_type)
+
+                    for band_indx in range(self.shape[0]):
+                        min_val, max_val = self.stats[band_indx]['min'], self.stats[band_indx]['max']
+
+                        mdiff = float(scale_vals[1] - scale_vals[0]) / float(max_val - min_val)
+
+                        out_arr[band_indx, :, :] = ((self.array[band_indx, :, :].astype(np.float64) - min_val) * mdiff +
+                                                    scale_vals[0]).astype(out_type)
+
+                    self.array = out_arr
+                else:
+                    self.array = self.array.astype(out_type)
+            else:
+                self.array = self.array.astype(out_type)
+
             self.dtype = gdal_array.NumericTypeCodeToGDALTypeCode(self.array.dtype)
 
             if self.nodatavalue is not None:
                 self.nodatavalue = np.array(self.nodatavalue).astype(out_type).item()
-
-            print('Changed raster data type to {}\n'.format(out_type))
-        else:
-            print('Raster data type already {}\n'.format(out_type))
 
     def make_polygon_geojson_feature(self):
         """
@@ -1375,28 +1399,6 @@ class Raster(object):
                     out_geom_extract[geom_id] = geom_dict
 
         return out_geom_extract
-
-    def get_stats(self,
-                  print_stats=False,
-                  approx=False):
-
-        """
-        Method to compute statistics of the raster object, and store as raster property
-        :param print_stats: If the statistics should be printed to console
-        :param approx: If approx statistics should be calculated instead to gain speed
-        :return: None
-        """
-
-        for ib in range(self.shape[0]):
-            band = self.datasource.GetRasterBand(ib+1)
-            band.ComputeStatistics(approx)
-            band_stats = dict(zip(['min', 'max', 'mean', 'stddev'], band.GetStatistics(int(approx), 0)))
-
-            if print_stats:
-                Opt.cprint('Band {} : {}'.format(self.bnames[ib],
-                                                 str(band_stats)))
-
-            self.stats[self.bnames[ib]] = band_stats
 
     def clip(self,
              cutline_file=None,
