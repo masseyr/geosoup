@@ -1213,6 +1213,11 @@ class Raster(object):
                                      Used only if the pass_pixel_coords flag is set to true.
                                      Returns the pixel centers of each pixel if set as true
                                      else returns top left corners
+                        min_pixels: Minimum number of pixels for reducer to calculate a value.
+                                    If the number of pixels are less than this, then an empty list is returned
+                        replace: If the pixel values in Raster.array object should be replaced with
+                                 the reduced value? This will only be computed of min_pixels condition is
+                                 satisfied and will change the Raster array. Use with caution.
                         reducer: Valid keywords: 'mean','median','max',
                                                  'min', 'percentile_xx' where xx is percentile from 1-99
 
@@ -1253,6 +1258,16 @@ class Raster(object):
         else:
             reducer = None
 
+        if 'min_pixels' in kwargs:
+            min_pixels = kwargs['min_pixels']
+        else:
+            min_pixels = None
+
+        if 'replace' in kwargs:
+            replace = kwargs['replace']
+        else:
+            replace = False
+
         # define band order
         if band_order is None:
             band_order = list(range(0, self.shape[0]))
@@ -1277,7 +1292,7 @@ class Raster(object):
         # prepare dict struct
         out_geom_extract = dict()
         for internal_id, _ in id_geom_dict.items():
-            out_geom_extract[internal_id] = {'values': [], 'coordinates': []}
+            out_geom_extract[internal_id] = {'values': [], 'coordinates': [], 'xyz_loc': []}
 
         # list of sample ids
         for tile in self.tile_grid:
@@ -1381,13 +1396,33 @@ class Raster(object):
                         out_geom_extract[geom_id]['values'] += list(tile_arr[band_order, x, y].tolist()
                                                                     for x, y in pixel_xy_loc)
 
+                        out_geom_extract[geom_id]['xyz_loc'] += list([[band_index] + xy_loc]
+                                                                     for xy_loc in pixel_xy_loc
+                                                                     for band_index in band_order)
+
             if reducer is not None:
                 warned = False
                 for geom_id, geom_dict in out_geom_extract.items():
                     try:
-                        geom_dict['values'] = Sublist.reduce(geom_dict['values'],
-                                                             method=reducer,
-                                                             axis=0).tolist()
+                        n_pixels = len(geom_dict['values'])
+                        if min_pixels is None:
+                            min_pixels = n_pixels
+
+                        if n_pixels >= min_pixels:
+                            geom_dict['values'] = Sublist.reduce(geom_dict['values'],
+                                                                 method=reducer,
+                                                                 axis=0).tolist()
+
+                            if replace:
+                                pixel_loc = (np.array(geom_dict['xyz_loc'])[:, 0],
+                                             np.array(geom_dict['xyz_loc'])[:, 1],
+                                             np.array(geom_dict['xyz_loc'])[:, 2])
+
+                                self.array[pixel_loc] = geom_dict['values']
+
+                        else:
+                            geom_dict['values'] = []
+
                         geom_dict['coordinates'] = Sublist.reduce(geom_dict['coordinates'],
                                                                   method=reducer,
                                                                   axis=0).tolist()
