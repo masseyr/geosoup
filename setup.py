@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="geosoup",
-    version="0.1.15",
+    version="0.1.16",
     author="Richard Massey",
     author_email="rm885@nau.edu",
     license='Apache License 2.0',
