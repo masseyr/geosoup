@@ -308,6 +308,15 @@ class Sublist(list):
              nbins=20,
              minmax=None):
 
+        """
+        Method to generate a histogram from a list of numbers
+        :param nbins: Number of bins to group the numbers in a list
+        :param minmax: Tuple of minimum and maximum values to be used
+                       as criteria of inclusion
+        :returns: frequency list (list of elements in each bin), list of bin edges
+
+        """
+
         if minmax is None:
             minmax = (min(var_list), max(var_list))
 
@@ -328,6 +337,19 @@ class Sublist(list):
                       nbins=20,
                       var=None,
                       minmax=None):
+
+        """
+        Method to clip the frequency bins at a threshold and randomly select the
+        elements from the remaining elements inside the bin
+        :param list_dicts: List of dictionaries with one of key as the specified variable
+        :param var: Name of the key, variable of interest
+        :param pctl: Bin clipping percentile, ignored if num is specified
+        :param num: Bin clipping value
+        :param nbins: Number of bins
+        :param minmax: Tuple of minimum and maximum values to be used
+                       as criteria of inclusion
+        :returns: list of dictionaries with clipped bins based on num or pctl
+        """
 
         if var is None:
             raise ValueError('Variable not specified')
@@ -1338,10 +1360,13 @@ class Opt:
     """
     def __init__(self,
                  obj=None):
+        """
+        Instantiate Opt class
+        """
         self.obj = obj  # mutable object
 
     def __repr__(self):
-        return "Optional helper and notice class"
+        return "<Optional notice class>"
 
     @staticmethod
     def print_memory_usage():
@@ -1383,15 +1408,27 @@ class Opt:
     @staticmethod
     def cprint(text,
                newline='\n'):
+        """
+        Print to stdout and flush
+        :param text: Text to print to stdout
+        :param newline: Newline character, default '\n' but can be changed
+                        to '' to concatenate consequetive outputs
+        """
         sys.stdout.write(str(text) + newline)
         sys.stdout.flush()
 
     @staticmethod
     def __copy__(obj):
+        """
+        Make a copy of an object using python's copy module
+        """
         return copy.deepcopy(obj)
 
     @staticmethod
     def temp_name():
+        """
+        Generate a temperory name based on current machine time with a .tmp extension
+        """
         return 'T' + datetime.datetime.now().isoformat().replace(':', '')\
             .replace('.', '').replace('-', '').replace('T', '') + '.tmp'
 
