@@ -347,7 +347,7 @@ class Raster(object):
                    offsets=None,
                    band_order=None):
         """
-        read raster array with offsets
+        Method to read raster array with offsets and a specific band order
         :param offsets: tuple or list - (xoffset, yoffset, xcount, ycount)
         :param band_order: order of bands to read
         """
@@ -884,6 +884,25 @@ class Raster(object):
                 mask_ras = None
                 out_datasource = None
                 return geom_wkt
+
+    def centroid(self,
+                 use_nodatavalue=False):
+        """
+        Method to return centroid of the Raster object based on its boundary
+        :param use_nodatavalue: Boolean flag to calculate the centroid
+                                based on valid pixel boundary
+        """
+        bounds = self.get_bounds(use_nodatavalue=use_nodatavalue,
+                                 xy_coordinates=False)
+
+        if use_nodatavalue:
+            bounds_geom = ogr.CreateGeometryFromWkt(bounds)
+            centroid_geom = bounds_geom.Centroid()
+            return centroid_geom.GetPoint()[0:2]
+
+        else:
+            bounds = self.get_bounds()
+            return float(bounds[0] + bounds[1])/2.0, float(bounds[2] + bounds[3])/2.0
 
     def get_pixel_bounds(self,
                          bound_coords=None,
