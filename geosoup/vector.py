@@ -15,10 +15,12 @@ __all__ = ['Vector',
 
 OGR_FIELD_DEF = {
     'int': ogr.OFTInteger,
+    'integer': ogr.OFTInteger,
     'long': ogr.OFTInteger,
     'float': ogr.OFTReal,
     'double': ogr.OFTReal,
     'str': ogr.OFTString,
+    'string': ogr.OFTString,
     'bool': ogr.OFTInteger,
     'nonetype': ogr.OFSTNone,
     'none': ogr.OFSTNone
@@ -231,7 +233,7 @@ class Vector(object):
 
                     self.type = OGR_TYPE_DEF['point']
                 else:
-                    self.type = geom_type
+                    self.type = self.ogr_geom_type(geom_type)
 
                 if spref is None:
                     if self.spref_str is not None:
