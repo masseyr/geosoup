@@ -4,7 +4,7 @@ import os
 import warnings
 from osgeo import ogr, osr, gdal, gdal_array
 from geosoup.common import Handler, Sublist, Opt, np
-
+from geosoup.exceptions import *
 
 __all__ = ['Vector',
            'OGR_FIELD_DEF',
@@ -70,11 +70,26 @@ class Vector(object):
                  verbose=False,
                  primary_key='fid',
                  feat_limit=None,
-                 attr_def=None):
+                 attr_def=None,
+                 append=False):
         """
         Constructor for class Vector
         :param filename: Name of the vector file (shapefile) with full path
+        :param name: Name of the layer if creating the layer
+        :param spref: osr SpatialReference object
+        :param spref_str: wkt representation of osr SpatialReference object
+        :param epsg: EPSG code for the spatial reference
+        :param proj4: PROJ string for the spatial reference
         :param layer_index: Index of the vector layer to pull (default: 0)
+        :param geom_type: Type of geometry (options: point, polygon, line, linestring,
+                                            multipolygon, multipoint, multilinestring,
+                                            default: point)
+        :param in_memory: If the vector should be initialied in memory instead of in/from file
+        :param verbose: If some steps should be displayed
+        :param primary_key: Primary key for features
+        :param feat_limit: Number of features to read from the vector file
+        :param attr_def: definition of attributes for the outbound vector layer
+        :pparam append: If vectorfile should be opened in write (append) mode instead of read
 
         todo: add union(), intersect(), clip(), and merge() methods
         """
@@ -103,10 +118,14 @@ class Vector(object):
         self.attr_def = attr_def
         self.bounds = None
 
+        self.mode = 'read' if not append else 'write'
+
         if filename is not None and os.path.isfile(filename):
 
             # open vector file
-            self.datasource = ogr.Open(self.filename)
+            self.datasource = ogr.Open(self.filename,
+                                       int(append))
+
             file_layer = self.datasource.GetLayerByIndex(layer_index)
 
             self.bounds = file_layer.GetExtent()
@@ -150,136 +169,149 @@ class Vector(object):
             # number of features
             self.nfeat = self.layer.GetFeatureCount()
 
-            if verbose:
-                sys.stdout.write('Reading vector {} of type {} with {} features\n'.format(self.name,
-                                                                                          str(self.type),
-                                                                                          str(self.nfeat)))
-
             # get field defintions
             layer_definition = self.layer.GetLayerDefn()
             self.fields = [layer_definition.GetFieldDefn(i) for i in range(0, layer_definition.GetFieldCount())]
 
-            # if the vector should be initialized in some other spatial reference
-            if dest_spref is not None:
-                transform_tool = osr.CoordinateTransformation(self.spref,
-                                                              dest_spref)
-                self.spref = dest_spref
-            else:
-                transform_tool = None
-
-            # iterate thru features and append to list
-            feat = self.layer.GetNextFeature()
-
-            feat_count = 0
-            while feat:
-                if feat_limit is not None:
-                    if feat_count >= feat_limit:
-                        break
-
-                # extract feature attributes
-                all_items = feat.items()
-
-                # and feature geometry feature string
-                geom = feat.GetGeometryRef()
-
-                # close rings if polygon
-                if geom_type == 3:
-                    geom.CloseRings()
-
-                # convert to another projection and write new features
-                if dest_spref is not None:
-                    geom.Transform(transform_tool)
-
-                    new_feat = ogr.Feature(layer_definition)
-                    for attr, val in all_items.items():
-                        new_feat.SetField(attr, val)
-                    new_feat.SetGeometry(geom)
-                else:
-                    new_feat = feat
+            if not append:
 
                 if verbose:
-                    sys.stdout.write('Feature {} of {}\n'.format(str(feat_count+1),
-                                                                 str(self.nfeat)))
+                    sys.stdout.write('Reading vector {} of type {} with {} features\n'.format(self.name,
+                                                                                              str(self.type),
+                                                                                              str(self.nfeat)))
+                # if the vector should be initialized in some other spatial reference
+                if dest_spref is not None:
+                    transform_tool = osr.CoordinateTransformation(self.spref,
+                                                                  dest_spref)
+                    self.spref = dest_spref
+                else:
+                    transform_tool = None
 
-                self.attributes.append(all_items)
-                self.features.append(new_feat)
-                self.wktlist.append(geom.ExportToWkt())
-                feat_count += 1
-
+                # iterate thru features and append to list
                 feat = self.layer.GetNextFeature()
 
-            self.nfeat = len(self.features)
+                feat_count = 0
+                while feat:
+                    if feat_limit is not None:
+                        if feat_count >= feat_limit:
+                            break
+
+                    # extract feature attributes
+                    all_items = feat.items()
+
+                    # and feature geometry feature string
+                    geom = feat.GetGeometryRef()
+
+                    # close rings if polygon
+                    if geom_type == 3:
+                        geom.CloseRings()
+
+                    # convert to another projection and write new features
+                    if dest_spref is not None:
+                        geom.Transform(transform_tool)
+
+                        new_feat = ogr.Feature(layer_definition)
+                        for attr, val in all_items.items():
+                            new_feat.SetField(attr, val)
+                        new_feat.SetGeometry(geom)
+                    else:
+                        new_feat = feat
+
+                    if verbose:
+                        sys.stdout.write('Feature {} of {}\n'.format(str(feat_count+1),
+                                                                     str(self.nfeat)))
+
+                    self.attributes.append(all_items)
+                    self.features.append(new_feat)
+                    self.wktlist.append(geom.ExportToWkt())
+                    feat_count += 1
+
+                    feat = self.layer.GetNextFeature()
 
             if verbose:
                 sys.stdout.write("\nInitialized Vector {} of type {} ".format(self.name,
                                                                               self.ogr_geom_type(self.type)) +
+                                 "in mode {} ".format(self.mode.upper()) +
+
                                  "with {} feature(s) and {} attribute(s)\n\n".format(str(self.nfeat),
-                                                                                   str(len(self.fields))))
+                                                                                     str(len(self.fields))))
         else:
-            if in_memory:
-
+            if in_memory or self.filename is None:
                 out_driver = ogr.GetDriverByName('Memory')
-                out_datasource = out_driver.CreateDataSource('mem_source')
-                self.datasource = out_datasource
-
+                datasource_name = 'mem_source'
                 self.name = name if name is not None else 'empty'
 
-                if geom_type is None:
-                    warnings.warn("\nGeometry type not specified, using Point geometry type" +
-                                  "\n{}".format(' '.join('{}={}'.format(geom_name, code) for
-                                                         code, geom_name in OGR_GEOM_DEF.items())),
+            else:
+                extension = Handler(self.filename).basename.split('.')[-1]
+                datasource_name = self.filename
+                self.name = Handler(self.filename).basename.replace('.' + extension, '').strip()
+
+                if extension == 'shp':
+                    out_driver = ogr.GetDriverByName('ESRI Shapefile')
+                elif extension == 'json':
+                    out_driver = ogr.GetDriverByName('Json')
+                else:
+                    raise UninitializedError
+
+            out_datasource = out_driver.CreateDataSource(datasource_name)
+            self.datasource = out_datasource
+
+            if geom_type is None:
+                warnings.warn("\nGeometry type not specified, using Point geometry type" +
+                              "\n{}".format(' '.join('{}={}'.format(geom_name, code) for
+                                                     code, geom_name in OGR_GEOM_DEF.items())),
+                              UserWarning,
+                              stacklevel=2)
+
+                self.type = OGR_TYPE_DEF['point']
+            else:
+                self.type = self.ogr_geom_type(geom_type)
+
+            if spref is None:
+                if self.spref_str is not None:
+                    self.spref = osr.SpatialReference()
+                    res = self.spref.ImportFromWkt(spref_str)
+                elif self.epsg is not None:
+                    self.spref = osr.SpatialReference()
+                    res = self.spref.ImportFromEPSG(self.epsg)
+                    self.spref_str = self.spref.ExportToWkt()
+                elif self.proj4 is not None:
+                    self.spref = osr.SpatialReference()
+                    res = self.spref.ImportFromEPSG(self.proj4)
+                    self.spref_str = self.spref.ExportToWkt()
+                else:
+                    warnings.warn("\nNo spatial reference provided,\n using geographic lat/lon (EPSG=4326)",
                                   UserWarning,
                                   stacklevel=2)
+                    self.epsg = 4326
+                    self.spref = osr.SpatialReference()
+                    self.spref.ImportFromEPSG(self.epsg)
+            else:
+                self.spref = spref
 
-                    self.type = OGR_TYPE_DEF['point']
-                else:
-                    self.type = self.ogr_geom_type(geom_type)
+            self.layer = self.datasource.CreateLayer(self.name,
+                                                     srs=self.spref,
+                                                     geom_type=self.type)
 
-                if spref is None:
-                    if self.spref_str is not None:
-                        self.spref = osr.SpatialReference()
-                        res = self.spref.ImportFromWkt(spref_str)
-                    elif self.epsg is not None:
-                        self.spref = osr.SpatialReference()
-                        res = self.spref.ImportFromEPSG(self.epsg)
-                        self.spref_str = self.spref.ExportToWkt()
-                    elif self.proj4 is not None:
-                        self.spref = osr.SpatialReference()
-                        res = self.spref.ImportFromEPSG(self.proj4)
-                        self.spref_str = self.spref.ExportToWkt()
-                    else:
-                        warnings.warn("\nNo spatial reference provided, using geographic\nEPSG=4326",
-                                      UserWarning,
-                                      stacklevel=2)
-                        self.epsg = 4326
-                        self.spref = osr.SpatialReference()
-                        self.spref.ImportFromEPSG(self.epsg)
-                else:
-                    self.spref = spref
+            if attr_def is not None:
+                for attr_name, attr_type in attr_def.items():
+                    temp_attr = ogr.FieldDefn(attr_name, OGR_FIELD_DEF[attr_type])
+                    if attr_type == 'str':
+                        temp_attr.SetWidth(self.width)
+                    if attr_type in ('float', 'int'):
+                        temp_attr.SetPrecision(self.precision)
 
-                self.layer = self.datasource.CreateLayer(self.name,
-                                                         srs=self.spref,
-                                                         geom_type=self.type)
+                    self.layer.CreateField(temp_attr)
+                    self.fields.append(temp_attr)
 
-                if attr_def is not None:
-                    for attr_name, attr_type in attr_def.items():
-                        temp_attr = ogr.FieldDefn(attr_name, OGR_FIELD_DEF[attr_type])
-                        if attr_type == 'str':
-                            temp_attr.SetWidth(self.width)
-                        if attr_type in ('float', 'int'):
-                            temp_attr.SetPrecision(self.precision)
-
-                        self.layer.CreateField(temp_attr)
-                        self.fields.append(temp_attr)
-
-                if primary_key is not None:
-                    fid = ogr.FieldDefn(primary_key, )
-                    fid.SetPrecision(9)
-                    self.layer.CreateField(fid)
-                    self.fields.append(fid)
+            if primary_key is not None:
+                fid = ogr.FieldDefn(primary_key, )
+                fid.SetPrecision(9)
+                self.layer.CreateField(fid)
+                self.fields.append(fid)
 
             if verbose:
-                sys.stdout.write("\nInitialized empty Vector\n")
+                sys.stdout.write("\nInitialized Vector {}\n".format(self.name))
 
     def __repr__(self):
         """
