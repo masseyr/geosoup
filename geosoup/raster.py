@@ -1,5 +1,6 @@
 import numpy as np
 from geosoup.common import Handler, Opt, Sublist
+from geosoup.exceptions import ImageProcessingError, ObjectNotFound
 import warnings
 import json
 from osgeo import gdal, gdal_array, ogr, osr, gdalconst
@@ -129,12 +130,12 @@ class Raster(object):
             self.metadict = Raster.get_raster_metadict(file_ptr=fileptr)
 
         else:
-            raise ValueError('No datasource found')
+            raise ImageProcessingError('No datasource found')
 
         if band_order is None:
             band_order = list(range(fileptr.RasterCount))
         elif max(band_order) >= fileptr.RasterCount:
-            raise ValueError('Band indices must be smaller than number of available bands')
+            raise ImageProcessingError('Band indices must be smaller than number of available bands')
 
         self.shape = [fileptr.RasterCount if not get_array else len(band_order),
                       fileptr.RasterYSize,
@@ -257,23 +258,15 @@ class Raster(object):
         if self.array is None:
             self.read_array()
 
-        if nbands == 1:
-            fileptr.GetRasterBand(1).WriteArray(self.array, 0, 0)
-            fileptr.GetRasterBand(1).SetDescription(self.bnames[0])
+        for i in range(0, nbands):
+            fileptr.GetRasterBand(i + 1).WriteArray(self.array[i, :, :], 0, 0)
+            fileptr.GetRasterBand(i + 1).SetDescription(self.bnames[i])
 
             if self.nodatavalue is not None:
-                fileptr.GetRasterBand(1).SetNoDataValue(self.nodatavalue)
+                fileptr.GetRasterBand(i + 1).SetNoDataValue(self.nodatavalue)
             if verbose:
-                Opt.cprint('Writing band: ' + self.bnames[0])
-        else:
-            for i in range(0, nbands):
-                fileptr.GetRasterBand(i + 1).WriteArray(self.array[i, :, :], 0, 0)
-                fileptr.GetRasterBand(i + 1).SetDescription(self.bnames[i])
+                Opt.cprint('Writing band: ' + self.bnames[i])
 
-                if self.nodatavalue is not None:
-                    fileptr.GetRasterBand(i + 1).SetNoDataValue(self.nodatavalue)
-                if verbose:
-                    Opt.cprint('Writing band: ' + self.bnames[i])
         if driver == 'MEM':
             if verbose:
                 Opt.cprint('File written to memory!')
@@ -480,7 +473,7 @@ class Raster(object):
 
             return any([not x for x in truth_about_empty_bands])
         else:
-            raise ValueError("File does not exist.")
+            raise ObjectNotFound("File does not exist.")
 
     def make_tiles(self,
                    tile_size_x,
@@ -577,7 +570,8 @@ class Raster(object):
             else:
                 raise AttributeError("Metadata dictionary does not exist.")
         else:
-            raise ValueError("Tile size {}x{} is larger than original raster {}x{}.".format(tile_size_y,
+            raise ImageProcessingError("Tile size "
+                                       "{}x{} is larger than original raster {}x{}.".format(tile_size_y,
                                                                                             tile_size_x,
                                                                                             self.shape[1],
                                                                                             self.shape[2]))
@@ -596,13 +590,13 @@ class Raster(object):
                 # open raster
                 img_pointer = gdal.Open(file_name)
             else:
-                raise ValueError("File does not exist.")
+                raise ObjectNotFound("File does not exist.")
 
         elif file_ptr is not None:
             img_pointer = file_ptr
 
         else:
-            raise ValueError("File or pointer not found")
+            raise ObjectNotFound("File or pointer not found")
 
         # get tiepoint, pixel size, pixel rotation
         geometadata = img_pointer.GetGeoTransform()
@@ -932,7 +926,7 @@ class Raster(object):
                     int(coords_locations[:, 1].min()), \
                     int(coords_locations[:, 1].max())
             else:
-                raise ValueError("Unknown coordinate types")
+                raise ImageProcessingError("Unknown coordinate types")
 
             if xmin < 0:
                 xmin = 0
@@ -944,9 +938,9 @@ class Raster(object):
                 ymax = self.shape[1]
 
             if xmin >= xmax:
-                raise ValueError("Image x-size should be greater than 0")
+                raise ImageProcessingError("Image x-size should be greater than 0")
             if ymin >= ymax:
-                raise ValueError("Image y-size should be greater than 0")
+                raise ImageProcessingError("Image y-size should be greater than 0")
         else:
             xmin, xmax, ymin, ymax = 0, self.shape[2], 0, self.shape[1]
 
@@ -1044,7 +1038,7 @@ class Raster(object):
             bands = list(range(1, self.shape[0] + 1))
 
         if block_coords is None:
-            raise ValueError("Block coords needed to retrieve tile")
+            raise ImageProcessingError("Block coords needed to retrieve tile")
         else:
             upperleft_x, upperleft_y, tile_rows, tile_cols = block_coords
 
@@ -1597,7 +1591,7 @@ class Raster(object):
             elif out_proj4 is not None:
                 res = spref.ImportFromProj4(out_proj4)
             else:
-                raise ValueError("Output Spatial reference not provided")
+                res = spref.ImportFromWkt(self.crs_string)
 
         warp_dict['srcSRS'] = self.crs_string
         warp_dict['dstSRS'] = spref.ExportToWkt()
@@ -1914,7 +1908,7 @@ class MultiRaster:
                 pctl = int(composite_type.split('_')[1])
                 temp_arr = np.apply_along_axis(lambda x: np.percentile(x[x != lras.nodatavalue], pctl), 0, tile_arr)
             else:
-                raise ValueError('Unknown composite option')
+                raise ImageProcessingError('Unknown composite option')
 
             # update output array with tile composite
             out_arr[_y: (_y+_rows), _x: (_x+_cols)] = temp_arr
