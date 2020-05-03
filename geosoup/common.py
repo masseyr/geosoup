@@ -1532,7 +1532,8 @@ class FTPHandler(Handler):
 
 class Logger(object):
     """
-    Class for logging output
+    Class for logging output.
+    Can be instantialized to log outputs to a file or stream
     """
 
     def __init__(self,
