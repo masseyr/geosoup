@@ -78,7 +78,7 @@ class Raster(object):
         self.transform = transform
         self.crs_string = crs_string
         self.name = name
-        self.dtype = dtype
+        self.dtype = gdal.GDT_Float32
         self.metadict = metadict
         self.nodatavalue = None
         self.tile_grid = list()
@@ -141,7 +141,9 @@ class Raster(object):
                       fileptr.RasterYSize,
                       fileptr.RasterXSize]
 
-        self.dtype = fileptr.GetRasterBand(1).DataType
+        if self.dtype is not None:
+            self.dtype = fileptr.GetRasterBand(1).DataType
+
         self.nodatavalue = fileptr.GetRasterBand(1).GetNoDataValue()
 
         # if get_array flag is true
@@ -965,12 +967,14 @@ class Raster(object):
         if not self.init:
             self.initialize()
 
+        self.tile_grid = []
+
         # convert to the number of pixels in the buffer region
         if tile_buffer is not None:
             buf_size_x = np.ceil(float(tile_buffer)/abs(float(self.transform[1])))
             buf_size_y = np.ceil(float(tile_buffer)/abs(float(self.transform[5])))
         else:
-            buf_size_x = buf_size_y = None
+            buf_size_x, buf_size_y = None, None
 
         xmin, xmax, ymin, ymax = self.get_pixel_bounds(bound_coords,
                                                        coords_type)
