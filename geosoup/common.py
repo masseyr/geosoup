@@ -1285,9 +1285,14 @@ class Handler(object):
             lines.append(delimiter.join(list(str(val) for _, val in data_dict.items())))
 
         if append:
-            with open(outfile, 'a') as f:
-                for line in lines:
-                    f.write(line + '\n')
+            if os.path.isfile(outfile):
+                with open(outfile, 'a') as f:
+                    for line in lines:
+                        f.write(line + '\n')
+            else:
+                with open(outfile, 'w') as f:
+                    for line in lines:
+                        f.write(line + '\n')
         else:
             with open(outfile, 'w') as f:
                 for line in lines:
