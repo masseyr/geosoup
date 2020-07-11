@@ -52,9 +52,9 @@ class Sublist(list):
         temp = list(i for i in range(0, len(self)) if self[i] == other)
 
         if len(temp) == 1:
-            return temp[0]
-        else:
-            return temp
+            temp = temp[0]
+
+        return temp
 
     def __gt__(self,
                other):
@@ -65,9 +65,9 @@ class Sublist(list):
         temp = list(i for i in range(0, len(self)) if self[i] > other)
 
         if len(temp) == 1:
-            return temp[0]
-        else:
-            return temp
+            temp = temp[0]
+
+        return temp
 
     def __ge__(self,
                other):
@@ -78,9 +78,9 @@ class Sublist(list):
         temp = list(i for i in range(0, len(self)) if self[i] >= other)
 
         if len(temp) == 1:
-            return temp[0]
-        else:
-            return temp
+            temp = temp[0]
+
+        return temp
 
     def __lt__(self,
                other):
@@ -91,9 +91,9 @@ class Sublist(list):
         temp = list(i for i in range(0, len(self)) if self[i] < other)
 
         if len(temp) == 1:
-            return temp[0]
-        else:
-            return temp
+            temp = temp[0]
+
+        return temp
 
     def __le__(self,
                other):
@@ -104,9 +104,9 @@ class Sublist(list):
         temp = list(i for i in range(0, len(self)) if self[i] <= other)
 
         if len(temp) == 1:
-            return temp[0]
-        else:
-            return temp
+            temp = temp[0]
+
+        return temp
 
     def __ne__(self,
                other):
@@ -117,9 +117,9 @@ class Sublist(list):
         temp = list(i for i in range(0, len(self)) if self[i] != other)
 
         if len(temp) == 1:
-            return temp[0]
-        else:
-            return temp
+            temp = temp[0]
+
+        return temp
 
     def __add__(self,
                 other):
@@ -170,9 +170,9 @@ class Sublist(list):
         :return: List
         """
         if index:
-            return [i for i, x in enumerate(self) if llim <= x <= ulim]
+            return list(i for i, x in enumerate(self) if llim <= x <= ulim)
         else:
-            return [x for x in self if llim <= x <= ulim]
+            return list(x for x in self if llim <= x <= ulim)
 
     def add(self,
             elem):
@@ -294,10 +294,7 @@ class Sublist(list):
         if step is not None:
             if start % step > 0:
                 out.append(start)
-                if start < step:
-                    start = step
-                elif start > step:
-                    start = start + step - (start % step)
+                start = step * (start < step) + (start + step - (start % step)) * (start > step)
             iterator = range(start, end, step)
         else:
             step = 1
@@ -639,26 +636,21 @@ class Sublist(list):
         Method to reduce a 2D or 3D array using a specific method
         :param array: Numpy array
         :param method: Method to use for reduction (options: mean, median, std_dev,
-                                                        percentile_xx, min, max, default:mean
+                                                        pctl_xx, min, max, default:mean
                                                              here xx is the percentile)
         :param axis: Axis to apply the reducer along
         :return: float
         """
-        if method == 'mean':
-            return np.mean(array, axis=axis)
-        elif method == 'median':
-            return np.median(array, axis=axis)
-        elif method == 'std_dev':
-            return np.std(array, axis=axis)
-        if method == 'min':
-            return np.min(array, axis=axis)
-        if method == 'max':
-            return np.max(array, axis=axis)
-        elif 'percentile' in method:
-            perc = int(method.split('_')[1])
-            return np.percentile(array, perc, axis=axis)
-        else:
+
+        if (method not in ('mean', 'median', 'std_dev', 'min', 'max')) or ('pctl' not in method):
             raise ValueError("Reducer = {} is not implemented".format(method))
+
+        return (method == 'mean') * np.mean(array, axis=axis) + \
+               (method == 'median') * np.median(array, axis=axis) + \
+               (method == 'std_dev') * np.std(array, axis=axis) + \
+               (method == 'min') * np.min(array, axis=axis) + \
+               (method == 'max') * np.max(array, axis=axis) + \
+               ('pctl' in method) * np.percentile(array, int(method.split('_')[1]), axis=axis)
 
 
 class Handler(object):
@@ -701,9 +693,6 @@ class Handler(object):
         """
         if not os.path.exists(self.dirname):
             os.makedirs(self.dirname)
-            # print('Created path: ' + input_di
-        else:
-            pass  # print('Path already exists: ' + self.dirname)
 
     def add_to_filename(self,
                         string=None,
@@ -715,7 +704,7 @@ class Handler(object):
                           This can be used in addition to the string
         :return:
         """
-        components = self.basename.split('.')
+
         if timestamp:
             timestamp = datetime.datetime.now().isoformat().replace('-', '').replace(':', '').split('.')[0]
         else:
@@ -726,11 +715,16 @@ class Handler(object):
         else:
             string = timestamp
 
-        if len(components) >= 2:
-            return self.dirname + self.sep + '.'.join(components[0:-1]) + \
-                      string + '.' + str(components[-1])
+        file_name, file_ext = os.path.splitext(self.basename)
+
+        file_name += string
+
+        self.basename = file_name + file_ext
+
+        if self.dirname is not None:
+            return self.dirname + self.sep + self.basename
         else:
-            return self.basename + self.sep + components[0] + string
+            return self.basename
 
     def file_rename_check(self):
         """
@@ -1072,35 +1066,25 @@ class Handler(object):
             'date': 'date',
             'array_echo': 'echo "Job ID is"$SLURM_ARRAY_TASK_ID'
         }
+
+        script_list = [script_dict['bash'],
+                       script_dict['job-name'],
+                       script_dict['time'],
+                       script_dict['cpus'],
+                       script_dict['mem'],
+                       script_dict['ntasks']]
+
         if array:
-            script_list = [
-                script_dict['bash'],
-                script_dict['job-name'],
-                script_dict['time'],
-                script_dict['cpus'],
-                script_dict['mem'],
-                script_dict['partition'],
-                script_dict['array_def'],
-                script_dict['array_out'],
-                script_dict['date'],
-            ]
-            for key, value in kwargs.items():
-                script_list.append(value)
-            script_list.append(script_dict['date'])
-        else:
-            script_list = [
-                script_dict['bash'],
-                script_dict['job-name'],
-                script_dict['time'],
-                script_dict['cpus'],
-                script_dict['mem'],
-                script_dict['partition'],
-                script_dict['out'],
-                script_dict['date'],
-            ]
-            for key, value in kwargs.items():
-                script_list.append(value)
-            script_list.append(script_dict['date'])
+            script_list += [script_dict['array_def'],
+                            script_dict['array_out'],
+                            script_dict['array_echo']]
+
+        script_list.append(script_dict['date'])
+
+        for key, value in kwargs.items():
+            script_list.append(value)
+
+        script_list.append(script_dict['date'])
 
         self.write_list_to_file(script_list)
 
@@ -1634,6 +1618,22 @@ class Timer:
         """
         return '<Timer class for {}>'.format(self.func.__name__)
 
+    def __call__(self, *args, **kwargs):
+        """
+        Function to compute timing for input function
+        :return: Function and prints time taken
+        """
+
+        t1 = time.time()
+        val = self.func(*args, **kwargs)
+        t2 = time.time()
+
+        # time to run
+        t = self.display_time(t2 - t1)
+
+        sys.stdout.write("Time it took to run {}: {}\n".format(self.func.__name__, t))
+        return val
+
     @staticmethod
     def display_time(seconds,
                      precision=3):
@@ -1682,40 +1682,31 @@ class Timer:
         # join output
         return ' '.join(result)
 
-    @classmethod
-    def timing(cls,
-               doit=False):
+    @staticmethod
+    def timing(func):
         """
         Function to compute timing for input function
-        :param doit: (abbr: Do it.) Keyword to determine if the wrapper returns
-                     the function with or without timing it
         :return: Function and prints time taken
         """
 
-        def time_it(func):
-
+        @wraps(func)
+        def wrapper(*args, **kwargs):
             """
-            Executes wrapper
+            Wrapper for func
+            :param args: Arguments
+            :param kwargs: Key word arguments
+            :return: Function func return
             """
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                """
-                Wrapper for func
-                :param args: Arguments
-                :param kwargs: Key word arguments
-                :return: Function func return
-                """
-                if doit:
-                    t1 = time.time()
-                    val = func(*args, **kwargs)
-                    t2 = time.time()
 
-                    # time to run
-                    t = Timer.display_time(t2 - t1)
+            t1 = time.time()
+            val = func(*args, **kwargs)
+            t2 = time.time()
 
-                    sys.stdout.write("Time it took to run {}: {}\n".format(func.__name__, t))
-                    return val
-                else:
-                    return func(*args, **kwargs)
-            return wrapper
-        return time_it
+            # time to run
+            t = Timer.display_time(t2 - t1)
+
+            sys.stdout.write("Time it took to run {}: {}\n".format(func.__name__, t))
+            return val
+
+        return wrapper
+
