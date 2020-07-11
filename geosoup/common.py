@@ -960,24 +960,23 @@ class Handler(object):
 
         getcontext().prec = precision
 
-        if unit == 'bit':
-            output = float(Decimal(size)*Decimal(2**3))
-        elif unit == 'kb':
-            output = float(Decimal(size)/Decimal(2**10))
-        elif unit == 'mb':
-            output = float(Decimal(size)/(Decimal(2**20)))
-        elif unit == 'gb':
-            output = float(Decimal(size)/(Decimal(2**30)))
-        elif unit == 'tb':
-            output = float(Decimal(size)/(Decimal(2**40)))
-        elif unit == 'pb':
-            output = float(Decimal(size)/(Decimal(2**50)))
-        else:
-            output = size
+        if unit not in ('b', 'kb', 'mb', 'gb', 'tb', 'pb', 'bit'):
+            raise NotImplementedError('Unrecognized size unit')
+
+        output = (unit == 'bit') * float(Decimal(size)*Decimal(2**3)) + \
+                 (unit == 'b') * float(Decimal(size)) + \
+                 (unit == 'kb') * float(Decimal(size)/Decimal(2**10)) + \
+                 (unit == 'mb') * float(Decimal(size)/(Decimal(2**20))) + \
+                 (unit == 'gb') * float(Decimal(size)/(Decimal(2**30))) + \
+                 (unit == 'tb') * float(Decimal(size)/(Decimal(2**40))) + \
+                 (unit == 'pb') * float(Decimal(size)/(Decimal(2**50)))
+
+        output = round(output, precision)
+
         if as_long:
-            return int(round(output, precision))
-        else:
-            return round(output, precision)
+            output = int(output)
+            
+        return output
 
     def write_list_to_file(self,
                            input_list,
