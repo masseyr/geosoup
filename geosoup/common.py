@@ -975,7 +975,7 @@ class Handler(object):
 
         if as_long:
             output = int(output)
-            
+
         return output
 
     def write_list_to_file(self,
