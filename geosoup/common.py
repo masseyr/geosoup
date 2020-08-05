@@ -642,15 +642,19 @@ class Sublist(list):
         :return: float
         """
 
-        if (method not in ('mean', 'median', 'std_dev', 'min', 'max')) or ('pctl' not in method):
-            raise ValueError("Reducer = {} is not implemented".format(method))
+        methods = {'mean': np.mean,
+                   'median': np.median,
+                   'std_dev': np.std,
+                   'min': np.min,
+                   'max': np.max,
+                   'pctl': np.percentile}
 
-        return (method == 'mean') * np.mean(array, axis=axis) + \
-               (method == 'median') * np.median(array, axis=axis) + \
-               (method == 'std_dev') * np.std(array, axis=axis) + \
-               (method == 'min') * np.min(array, axis=axis) + \
-               (method == 'max') * np.max(array, axis=axis) + \
-               ('pctl' in method) * np.percentile(array, int(method.split('_')[1]), axis=axis)
+        if 'pctl' in method:
+            return methods['pctl'](array, int(method.split('_')[1]), axis=axis)
+        elif method in ('mean', 'median', 'std_dev', 'min', 'max'):
+            return methods[method](array, axis=axis)
+        else:
+            raise RuntimeError("Reducer {} is not implemented".format(method))
 
 
 class Handler(object):
