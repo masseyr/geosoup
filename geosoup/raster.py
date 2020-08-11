@@ -2,6 +2,8 @@ import numpy as np
 from geosoup.common import Handler, Opt, Sublist
 from geosoup.exceptions import ImageProcessingError, ObjectNotFound
 import warnings
+import random
+import time
 import json
 from osgeo import gdal, gdal_array, ogr, osr, gdalconst
 np.set_printoptions(suppress=True)
@@ -78,7 +80,20 @@ class Raster(object):
         self.transform = transform
         self.crs_string = crs_string
         self.name = name
-        self.dtype = gdal.GDT_Float32
+
+        if type(dtype) == str:
+            try:
+                self.dtype = GDAL_FIELD_DEF[dtype]
+            except Exception in (TypeError, ValueError, KeyError):
+                try:
+                    self.dtype = int(dtype)
+                except Exception in (TypeError, ValueError, KeyError):
+                    self.dtype = GDAL_FIELD_DEF['float']
+        elif type(dtype) in (int, float):
+            self.dtype = int(dtype)
+        else:
+            self.dtype = gdal.GDT_Float32
+
         self.metadict = metadict
         self.nodatavalue = None
         self.tile_grid = list()
@@ -340,11 +355,15 @@ class Raster(object):
 
     def read_array(self,
                    offsets=None,
-                   band_order=None):
+                   band_order=None,
+                   n_tries=5,
+                   nodatavalue=-9999):
         """
         Method to read raster array with offsets and a specific band order
         :param offsets: tuple or list - (xoffset, yoffset, xcount, ycount)
         :param band_order: order of bands to read
+        :param n_tries: number of tries after read error
+        :param nodatavalue: No data value
         """
 
         if not self.init:
@@ -373,11 +392,29 @@ class Raster(object):
 
         # read array and store the band values and name in array
         for i, b in enumerate(band_order):
-            if self.array_offsets is None:
-                array3d[i, :, :] = fileptr.GetRasterBand(b + 1).ReadAsArray()
-            else:
-                array3d[i, :, :] = fileptr.GetRasterBand(b + 1).ReadAsArray(*self.array_offsets,
-                                                                            resample_alg=gdalconst.GRA_NearestNeighbour)
+            read_success = True
+            for i_try in range(n_tries):
+                try:
+                    if self.array_offsets is None:
+                        array3d[i, :, :] = fileptr.GetRasterBand(b + 1).ReadAsArray()
+                    else:
+                        array3d[i, :, :] = fileptr.GetRasterBand(b + 1).ReadAsArray(*self.array_offsets,
+                                                                                    resample_alg=
+                                                                                    gdalconst.GRA_NearestNeighbour)
+                    break
+                except RuntimeError as e:
+                    read_success = False
+                    Opt.cprint(e)
+                    Opt.cprint('Retrying failed read... attempt {}'.format(str(i_try + 1)))
+                    time.sleep(random.random() + 1.0)
+
+            if not read_success:
+                Opt.cprint('Retrying failed with {} attempts...using no-data value'.format(str(n_tries)))
+
+                if self.nodatavalue is not None:
+                    array3d[i, :, :] = self.nodatavalue
+                else:
+                    array3d[i, :, :] = nodatavalue
 
         if (self.shape[0] == 1) and (len(array3d.shape) > 2):
             self.array = array3d.reshape([self.array_offsets[3],
@@ -750,10 +787,8 @@ class Raster(object):
         if type(xy_list) != list:
             xy_list = [xy_list]
 
-        if pixel_center:
-            add_const = (float(pixel_size[0])/2.0, float(pixel_size[1])/2.0)
-        else:
-            add_const = (0.0, 0.0)
+        add_const = (float(pixel_size[0])/2.0) * pixel_center, \
+                    (float(pixel_size[1])/2.0) * pixel_center
 
         return list((float(xy[0]) * float(pixel_size[0]) + tie_point[0] + add_const[0],
                      float(xy[1]) * float(pixel_size[1]) + tie_point[1] + add_const[1])
@@ -1015,13 +1050,17 @@ class Raster(object):
                  block_coords=None,
                  finite_only=True,
                  edge_buffer=0,
-                 nan_replacement=None):
+                 nan_replacement=None,
+                 n_tries=5,
+                 nodatavalue=-9999):
         """
         Method to get raster numpy array of a tile
         :param bands: bands to get in the array, index starts from one. (default: all)
         :param finite_only:  If only finite values should be returned
         :param edge_buffer: Number of extra pixels to retrieve further out from the edges (default: 0)
         :param nan_replacement: replacement for NAN values
+        :param n_tries: Number of randomized tries when reading raster is errored out
+        :param nodatavalue: No data value default -9999
         :param block_coords: coordinates of tile to retrieve in image/array coords
                              format is (upperleft_x, upperleft_y, tile_cols, tile_rows)
                              upperleft_x and upperleft_y are array coordinates starting at 0,
@@ -1075,25 +1114,35 @@ class Raster(object):
                             tile_rows + (2 * edge_buffer - pixel_deficit[1] + pixel_deficit[3]),
                             tile_cols + (2 * edge_buffer - pixel_deficit[0] + pixel_deficit[2])]
 
-        if len(bands) == 1:
-            temp_band = self.datasource.GetRasterBand(bands[0])
-            tile_arr = temp_band.ReadAsArray(*new_block_coords)
-            tile_arr = tile_arr[np.newaxis, :, :]
+        tile_arr = np.zeros((len(bands),
+                             new_block_coords[3],
+                             new_block_coords[2]),
+                            gdal_array.GDALTypeCodeToNumericTypeCode(self.dtype))
 
-        else:
-            tile_arr = np.zeros((len(bands),
-                                 new_block_coords[3],
-                                 new_block_coords[2]),
-                                gdal_array.GDALTypeCodeToNumericTypeCode(self.dtype))
+        for jj, band in enumerate(bands):
+            read_success = True
+            for i_try in range(n_tries):
+                try:
+                    temp_band = self.datasource.GetRasterBand(band)
+                    tile_arr[jj, :, :] = temp_band.ReadAsArray(*new_block_coords)
+                    break
+                except RuntimeError as e:
+                    read_success = False
+                    Opt.cprint(e)
+                    Opt.cprint('Retrying failed read...attempt {}'.format(i_try + 1))
+                    time.sleep(random.random() + 1.0)
 
-            for jj, band in enumerate(bands):
-                temp_band = self.datasource.GetRasterBand(band)
-                tile_arr[jj, :, :] = temp_band.ReadAsArray(*new_block_coords)
+            if not read_success:
+                Opt.cprint('Retrying failed with {} attempts...using no-data value'.format(str(n_tries)))
+                if self.nodatavalue is not None:
+                    tile_arr[jj, :, :] = self.nodatavalue
+                else:
+                    tile_arr[jj, :, :] = nodatavalue
 
-            if finite_only:
-                if np.isnan(tile_arr).any() or np.isinf(tile_arr).any():
-                    tile_arr[np.isnan(tile_arr)] = nan_replacement
-                    tile_arr[np.isinf(tile_arr)] = nan_replacement
+        if finite_only:
+            if np.isnan(tile_arr).any() or np.isinf(tile_arr).any():
+                tile_arr[np.isnan(tile_arr)] = nan_replacement
+                tile_arr[np.isinf(tile_arr)] = nan_replacement
 
         return tile_arr
 
@@ -1175,7 +1224,7 @@ class Raster(object):
         id_geom_dict = dict()
         geom_types = []
 
-        for wkt_string_indx, wkt_string in enumerate(range(len(wkt_strings))):
+        for wkt_string_indx, wkt_string in enumerate(wkt_strings):
             # multi geometry should be separated
             if separate_multi_geom:
                 if ('MULTI' in wkt_string) or ('multi' in wkt_string):
@@ -1221,8 +1270,8 @@ class Raster(object):
         :param band_order: Order of bands to be extracted (list of band indices)  default: all bands
 
         :param kwargs: List of additional arguments
-                        tile_size : tuple (256, 256) default
-                                    Size of internal tiling
+                        tile_size : tuple (x size, y size)
+                                   Size of internal tiling
                         multi_geom_separate: bool (False) default
                                             if multi geometries should be separated or not
                         pass_pixel_coords: bool (False) default
@@ -1373,7 +1422,7 @@ class Raster(object):
                     result = burn_layer.CreateField(fielddefn)
                     layerdef = burn_layer.GetLayerDefn()
 
-                    geom_burn_val = 0
+                    geom_burn_val = 1
                     geom_dict = {}
                     for geom_id, geom in geom_list:
                         # create features in layer
@@ -1397,14 +1446,22 @@ class Raster(object):
                     temp_band = target_ds.GetRasterBand(1)
                     mask_arr = temp_band.ReadAsArray()
 
+                    min_burn_val = min(list(geom_dict.keys()))
+                    max_burn_val = max(list(geom_dict.keys()))
+
+                    pixel_xy_loc = np.where((mask_arr >= min_burn_val) & (mask_arr <= max_burn_val))
+                    burn_vals = mask_arr[pixel_xy_loc]
+                    pixel_xy_loc_list = np.array(list(zip(*pixel_xy_loc)))
+
+                    burn_dict = {}
+                    for geom_burn_val in range(min_burn_val, max_burn_val + 1):
+                        burn_dict[geom_burn_val] = pixel_xy_loc_list[np.where(burn_vals == geom_burn_val)].tolist()
+
                     for geom_burn_val, geom_id in geom_dict.items():
-
                         # make list of unmasked pixels
-                        pixel_xy_loc = list([y, x] for y, x in np.transpose(np.where(mask_arr == geom_burn_val)))
-
                         if pass_pixel_coords:
                             # get coordinates
-                            out_geom_extract[geom_id]['coordinates'] += self.get_coords(pixel_xy_loc,
+                            out_geom_extract[geom_id]['coordinates'] += self.get_coords(burn_dict[geom_burn_val],
                                                                                         (self.transform[1],
                                                                                          self.transform[5]),
                                                                                         tile['tie_point'],
@@ -1412,10 +1469,10 @@ class Raster(object):
 
                         # get band values from tile array
                         out_geom_extract[geom_id]['values'] += list(tile_arr[band_order, x, y].tolist()
-                                                                    for x, y in pixel_xy_loc)
+                                                                    for x, y in burn_dict[geom_burn_val])
 
-                        out_geom_extract[geom_id]['xyz_loc'] += list([[band_index] + xy_loc]
-                                                                     for xy_loc in pixel_xy_loc
+                        out_geom_extract[geom_id]['xyz_loc'] += list([[band_index] + list(xy_loc)]
+                                                                     for xy_loc in burn_dict[geom_burn_val]
                                                                      for band_index in band_order)
 
             if reducer is not None:
@@ -1893,7 +1950,8 @@ class MultiRaster:
             lras.make_tile_grid(tile_size,
                                 tile_size)
 
-        Opt.cprint(lras)
+        if verbose:
+            Opt.cprint(lras)
 
         # make numpy array to hold the final result
         out_arr = np.zeros((lras.shape[1], lras.shape[2]),
@@ -1903,7 +1961,8 @@ class MultiRaster:
         count = 0
         for tie_pt, tile_arr in lras.get_next_tile(bands=t_order):
 
-            Opt.cprint(lras.tile_grid[count]['block_coords'])
+            if verbose:
+                Opt.cprint(lras.tile_grid[count]['block_coords'])
 
             _x, _y, _cols, _rows = lras.tile_grid[count]['block_coords']
 
@@ -1931,7 +1990,8 @@ class MultiRaster:
         if write_raster:
             # write raster
             lras.write_to_file(outfile)
-            Opt.cprint('Written {}'.format(outfile))
+            if verbose:
+                Opt.cprint('Written {}'.format(outfile))
         else:
             return lras
 
