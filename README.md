@@ -1,4 +1,4 @@
-## Geosoup v0.1.25
+## Geosoup v0.1.26
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3740462.svg)](https://doi.org/10.5281/zenodo.3740462)
 
