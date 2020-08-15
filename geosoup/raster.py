@@ -1078,6 +1078,7 @@ class Raster(object):
         if len(bands) == 1:
             temp_band = self.datasource.GetRasterBand(bands[0])
             tile_arr = temp_band.ReadAsArray(*new_block_coords)
+            tile_arr = tile_arr[np.newaxis, :, :]
 
         else:
             tile_arr = np.zeros((len(bands),
