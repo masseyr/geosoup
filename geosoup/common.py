@@ -250,7 +250,7 @@ class Sublist(list):
         :return: Samples object
         """
 
-        arr = np.array(self)
+        arr = np.array(list(range(len(self))))
 
         if num >= len(self):
             return self
@@ -258,10 +258,10 @@ class Sublist(list):
         elif systematic:
             diff_seq = self.custom_list(0, len(self)-1, step=int(float(len(self))/float(num)))
             temp = arr[np.array(diff_seq)]
-            return Sublist(temp)
+            return self[temp]
 
         else:
-            return Sublist(np.random.choice(arr, size=num, replace=False))
+            return self[np.random.choice(arr, size=num, replace=False).tolist()]
 
     def tuple_by_pairs(self):
         """
