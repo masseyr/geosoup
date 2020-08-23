@@ -62,8 +62,8 @@ class Vector(object):
                  name=None,
                  spref=None,
                  spref_str=None,
+                 spref_str_type='wkt',
                  epsg=None,
-                 proj4=None,
                  layer_index=0,
                  geom_type=None,
                  in_memory=False,
@@ -79,7 +79,7 @@ class Vector(object):
         :param spref: osr SpatialReference object
         :param spref_str: wkt representation of osr SpatialReference object
         :param epsg: EPSG code for the spatial reference
-        :param proj4: PROJ string for the spatial reference
+        :param spref_str_type: Spatial ref string type (wkt, proj4) default: wkt
         :param layer_index: Index of the vector layer to pull (default: 0)
         :param geom_type: Type of geometry (options: point, polygon, line, linestring,
                                             multipolygon, multipoint, multilinestring,
@@ -103,12 +103,14 @@ class Vector(object):
 
         self.precision = 8  # Precision is set only for float attributes
         self.width = 50  # Width is set for string characters
+
+        self.spref = spref
         self.epsg = epsg  # EPSG SRID
-        self.proj4 = proj4
+        self.spref_str = spref_str
+        self.spref_str_type = spref_str_type
 
         self.layer = None
-        self.spref = spref
-        self.spref_str = spref_str
+
         self.type = self.ogr_geom_type(geom_type) if geom_type is not None else None
 
         self.name = name
@@ -154,6 +156,7 @@ class Vector(object):
                 dest_spref = None
 
             self.spref_str = self.spref.ExportToWkt()
+            self.spref_str_type = 'wkt'
 
             # other layer metadata
             if geom_type is None:
@@ -270,14 +273,17 @@ class Vector(object):
             if spref is None:
                 if self.spref_str is not None:
                     self.spref = osr.SpatialReference()
-                    res = self.spref.ImportFromWkt(spref_str)
+
+                    if self.spref_str_type == 'wkt':
+                        res = self.spref.ImportFromWkt(spref_str)
+                    elif self.spref_str_type == 'proj4':
+                        res = self.spref.ImportFromProj4(spref_str)
+                    else:
+                        UninitializedError("Spatial reference strings " +
+                                           "of type {} are not implemented".format(self.spref_str_type))
                 elif self.epsg is not None:
                     self.spref = osr.SpatialReference()
                     res = self.spref.ImportFromEPSG(self.epsg)
-                    self.spref_str = self.spref.ExportToWkt()
-                elif self.proj4 is not None:
-                    self.spref = osr.SpatialReference()
-                    res = self.spref.ImportFromEPSG(self.proj4)
                     self.spref_str = self.spref.ExportToWkt()
                 else:
                     warnings.warn("\nNo spatial reference provided,\n using geographic lat/lon (EPSG=4326)",
@@ -285,7 +291,7 @@ class Vector(object):
                                   stacklevel=2)
                     self.epsg = 4326
                     self.spref = osr.SpatialReference()
-                    self.spref.ImportFromEPSG(self.epsg)
+                    res = self.spref.ImportFromEPSG(self.epsg)
             else:
                 self.spref = spref
 
@@ -522,6 +528,7 @@ class Vector(object):
         if attr is not None:
             for attr_name, attr_val in attr.items():
                 feat.SetField(attr_name, attr_val)
+
             if primary_key is not None:
                 if primary_key not in attr:
                     feat.SetField(primary_key, self.nfeat)
@@ -532,6 +539,7 @@ class Vector(object):
         self.layer.CreateFeature(feat)
         self.features.append(feat)
         self.wktlist.append(geom.ExportToWkt())
+
         if attr is not None:
             if primary_key is not None:
                 attr.update({primary_key: self.nfeat})
@@ -1085,123 +1093,36 @@ class Vector(object):
         :param verbose: Display std output
         :return: Vector object
         """
-
-        vector = cls()
-
         if verbose:
             print('\nCreating Vector...')
 
-        if type(geom_strings).__name__ == 'str':
-            vector.nfeat = 1
-        elif type(geom_strings).__name__ == 'list':
-            vector.nfeat = len(geom_strings)
-        else:
-            raise ValueError('Number of features not attributable')
-
-        if type(geom_strings).__name__ != 'list':
-            geom_strings = [geom_strings]
-
-        if attributes is not None:
-            if type(attributes).__name__ != 'list':
-                attributes = [attributes]
-
-        if geom_string_type == 'wkt':
-            vector.wktlist = geom_strings
-            geoms = list(ogr.CreateGeometryFromWkt(geom_string) for geom_string in geom_strings)
-
-        elif geom_string_type == 'json':
-            vector.wktlist = geom_strings
-            geoms = list(ogr.CreateGeometryFromJson(geom_string) for geom_string in geom_strings)
-
-        elif geom_string_type == 'wkb':
-            vector.wktlist = geom_strings
-            geoms = list(ogr.CreateGeometryFromWkb(geom_string) for geom_string in geom_strings)
-
+        if geom_string_type in ('wkt', 'json', 'wkb'):
+            geom_func = {'wkt': ogr.CreateGeometryFromWkt,
+                         'json': ogr.CreateGeometryFromJson,
+                         'wkb': ogr.CreateGeometryFromWkb}
         else:
             raise TypeError("Unsupported geometry type")
 
-        if spref is None:
-            spref = osr.SpatialReference()
-
-            if spref_string is not None:
-                if spref_string_type == 'wkt':
-                    res = spref.ImportFromWkt(spref_string)
-                elif spref_string_type == 'proj4':
-                    res = spref.ImportFromProj4(spref_string)
-                elif spref_string_type == 'epsg':
-                    res = spref.ImportFromEPSG(spref_string)
-                else:
-                    raise RuntimeError("No spatial reference")
-            else:
-                res = spref.ImportFromEPSG(out_epsg)
-
-        vector.spref = spref
-        vector.spref_str = spref.ExportToWkt()
-
-        vector.attribute_def = attribute_types
-        vector.attributes = attributes
-
-        # get driver to write to memory
-        memory_driver = ogr.GetDriverByName('Memory')
-        vector.datasource = memory_driver.CreateDataSource('out')
-
-        if vector_type is None:
-            geom_type = geoms[0].GetGeometryType()
-        elif type(vector_type).__name__ == 'str':
-            geom_type = OGR_TYPE_DEF[vector_type]
-        elif type(vector_type).__name__ == 'int' or \
-                type(vector_type).__name__ == 'long':
-            geom_type = vector_type
-        else:
-            raise ValueError("Invalid geometry type")
-
-        vector.type = geom_type
-
-        # create layer in memory
-        temp_layer = vector.datasource.CreateLayer('temp_layer',
-                                                   srs=spref,
-                                                   geom_type=geom_type)
-        vector.layer = temp_layer
-        vector.fields = list()
-
-        if (attributes is not None) != (attribute_types is not None):
-            raise RuntimeError('One of attribute values or attribute definitions is missing')
-        elif attributes is not None and attribute_types is not None:
-            for attr_name, attr_val in attributes[0].items():
-                if attr_name not in attribute_types:
-                    raise RuntimeError('Attribute values supplied for undefined attributes')
-        else:
-            attribute_types = {'GeomID': 'int'}
-            attributes = list({'GeomID': i} for i in range(0, len(geom_strings)))
-
-        # create the attribute fields in the layer
-        for attr_name, attr_type in attribute_types.items():
-            fielddefn = ogr.FieldDefn(attr_name, OGR_FIELD_DEF[attr_type])
-            vector.fields.append(fielddefn)
-            res = temp_layer.CreateField(fielddefn)
-
-        # layer definition with new fields
-        temp_layer_definition = temp_layer.GetLayerDefn()
+        vector = cls(name='vector_from_geom_list',
+                     spref=spref,
+                     spref_str=spref_string,
+                     spref_str_type=spref_string_type,
+                     epsg=out_epsg,
+                     geom_type=vector_type,
+                     in_memory=True,
+                     verbose=verbose,
+                     primary_key='fid',
+                     attr_def=attribute_types)
 
         if verbose:
-            print('Adding geometries...\n')
+            Opt.cprint('Creating geometries in memory...\n')
 
-        for i, geom in enumerate(geoms):
-            if verbose:
-                print('geometry {} of {}'.format(str(i+1),
-                                                 str(len(geoms))))
+        for indx, geom_string in enumerate(geom_strings):
+            vector.add_feat(geom_func[geom_string_type](geom_string),
+                            attr=attributes[indx])
 
-            # create new feature using geometry
-            temp_feature = ogr.Feature(temp_layer_definition)
-            temp_feature.SetGeometry(geom)
-
-            # copy attributes to each feature, the order is the order of features
-            for attrname, attrval in attributes[i].items():
-                temp_feature.SetField(attrname, attrval)
-
-            # create feature in layer
-            temp_layer.CreateFeature(temp_feature)
-            vector.features.append(temp_feature)
+        if verbose:
+            Opt.cprint('Created {} geometries'.format(str(vector.nfeat)))
 
         return vector
 
