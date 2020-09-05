@@ -70,12 +70,13 @@ class Raster(object):
                  dtype=None,
                  shape=None,
                  transform=None,
-                 crs_string=None):
+                 crs_string=None,
+                 datasource=None):
 
         self.array = array
         self.array_offsets = None  # (px, py, xoff, yoff)
         self.bnames = bnames
-        self.datasource = None
+        self.datasource = datasource
         self.shape = shape
         self.transform = transform
         self.crs_string = crs_string
@@ -240,6 +241,10 @@ class Raster(object):
         :param overviews: list of overviews to compute( default: [2, 4, 8, 16, 32, 64, 128, 256])
         :param verbose: If the steps should be displayed
         :param kwargs: keyword arguments for creation options
+                       example:
+                       geotiff creation options can be used as follows:
+                         compress='lzw',
+                         bigtiff='yes
         """
         creation_options = []
         if len(kwargs) > 0:
@@ -513,107 +518,6 @@ class Raster(object):
             return any([not x for x in truth_about_empty_bands])
         else:
             raise ObjectNotFound("File does not exist.")
-
-    def make_tiles(self,
-                   tile_size_x,
-                   tile_size_y,
-                   out_path):
-
-        """
-        Make tiles from the tif file
-        :param tile_size_y: Tile size along x
-        :param tile_size_x: tile size along y
-        :param out_path: Output folder
-        :return:
-        """
-
-        # get all the file parameters and metadata
-        in_file = self.name
-        bands, rows, cols = self.shape
-
-        if 0 < tile_size_x <= cols and 0 < tile_size_y <= rows:
-
-            if self.metadict is not None:
-
-                # assign variables
-                metadict = self.metadict
-                dtype = metadict['datatype']
-                ulx, uly = [metadict['ulx'], metadict['uly']]
-                px, py = [metadict['xpixel'], metadict['ypixel']]
-                rotx, roty = [metadict['rotationx'], metadict['rotationy']]
-                crs_string = metadict['projection']
-
-                # file name without extension (e.g. .tif)
-                out_file_basename = Handler(in_file).basename.split('.')[0]
-
-                # open file
-                in_file_ptr = gdal.Open(in_file)
-
-                # loop through the tiles
-                for i in range(0, cols, tile_size_x):
-                    for j in range(0, rows, tile_size_y):
-
-                        if (cols - i) != 0 and (rows - j) != 0:
-
-                            # check size of tiles for edge tiles
-                            if (cols - i) < tile_size_x:
-                                tile_size_x = cols - i + 1
-
-                            if (rows - j) < tile_size_y:
-                                tile_size_y = rows - j + 1
-
-                            # name of the output tile
-                            out_file_name = str(out_path) + Handler().sep + str(out_file_basename) + \
-                                            "_" + str(i + 1) + "_" + str(j + 1) + ".tif"
-
-                            # check if file already exists
-                            out_file_name = Handler(filename=out_file_name).file_remove_check()
-
-                            # get/calculate spatial parameters
-                            new_ul = [ulx + i * px, uly + j * py]
-                            new_lr = [new_ul[0] + px * tile_size_x, new_ul[1] + py * tile_size_y]
-                            new_transform = (new_ul[0], px, rotx, new_ul[1], roty, py)
-
-                            # initiate output file
-                            driver = gdal.GetDriverByName("GTiff")
-                            out_file_ptr = driver.Create(out_file_name, tile_size_x, tile_size_y, bands, dtype)
-
-                            for k in range(0, bands):
-                                # get data
-                                band_name = in_file_ptr.GetRasterBand(k + 1).GetDescription()
-                                band = in_file_ptr.GetRasterBand(k + 1)
-                                band_data = band.ReadAsArray(i, j, tile_size_x, tile_size_y)
-
-                                # put data
-                                out_file_ptr.GetRasterBand(k + 1).WriteArray(band_data, 0, 0)
-                                out_file_ptr.GetRasterBand(k + 1).SetDescription(band_name)
-
-                            # set spatial reference and projection parameters
-                            out_file_ptr.SetGeoTransform(new_transform)
-                            out_file_ptr.SetProjection(crs_string)
-
-                            # delete pointers
-                            out_file_ptr.FlushCache()  # save to disk
-                            out_file_ptr = None
-                            driver = None
-
-                            # check for empty tiles
-                            out_raster = Raster(out_file_name)
-                            if out_raster.chk_for_empty_tiles:
-                                print('Removing empty raster file: ' + Handler(out_file_name).basename)
-                                Handler(out_file_name).file_delete()
-                                print('')
-
-                            # unassign
-                            out_raster = None
-            else:
-                raise AttributeError("Metadata dictionary does not exist.")
-        else:
-            raise ImageProcessingError("Tile size "
-                                       "{}x{} is larger than original raster {}x{}.".format(tile_size_y,
-                                                                                            tile_size_x,
-                                                                                            self.shape[1],
-                                                                                            self.shape[2]))
 
     @staticmethod
     def get_raster_metadict(file_name=None,
@@ -1041,7 +945,8 @@ class Raster(object):
                 self.tile_grid.append({'block_coords': (x, y, cols, rows),
                                        'tie_point': tie_pt,
                                        'bound_coords': bounds,
-                                       'first_pixel': (xmin, ymin)})
+                                       'first_pixel': (xmin, ymin),
+                                       'edge_buffer': (buf_size_x, buf_size_y)})
 
         self.ntiles = len(self.tile_grid)
 
@@ -1049,7 +954,7 @@ class Raster(object):
                  bands=None,
                  block_coords=None,
                  finite_only=True,
-                 edge_buffer=0,
+                 edge_buffer=None,
                  nan_replacement=None,
                  n_tries=5,
                  nodatavalue=-9999):
@@ -1057,7 +962,8 @@ class Raster(object):
         Method to get raster numpy array of a tile
         :param bands: bands to get in the array, index starts from one. (default: all)
         :param finite_only:  If only finite values should be returned
-        :param edge_buffer: Number of extra pixels to retrieve further out from the edges (default: 0)
+        :param edge_buffer: Number of extra pixels to retrieve further out from the edges (default: None)
+                           Tuple (buf_size_x, buf_size_y)
         :param nan_replacement: replacement for NAN values
         :param n_tries: Number of randomized tries when reading raster is errored out
         :param nodatavalue: No data value default -9999
@@ -1067,6 +973,11 @@ class Raster(object):
                              cols and rows are number of pixels to retrieve for the tile along x and y respectively
         :return: numpy array
         """
+
+        if edge_buffer is None:
+            edge_buffer_x, edge_buffer_y =  0, 0
+        else:
+            edge_buffer_x, edge_buffer_y = edge_buffer
 
         if not self.init:
             self.initialize()
@@ -1089,30 +1000,26 @@ class Raster(object):
         ras_rows, ras_cols = self.shape[1], self.shape[2]
 
         # accounting for number of pixels less than the required size (always >= 0)
-        if edge_buffer > 0:
+        # pixel deficit on left, top, right, and bottom edges respectively
+        pixel_deficit = [(edge_buffer_x - upperleft_x) if (upperleft_x < edge_buffer_x) else 0,
 
-            # pixel deficit on left, top, right, and bottom edges respectively
-            pixel_deficit = [(edge_buffer - upperleft_x) if (upperleft_x < edge_buffer) else 0,
+                         (edge_buffer_y - upperleft_y) if (upperleft_y < edge_buffer_y) else 0,
 
-                             (edge_buffer - upperleft_y) if (upperleft_y < edge_buffer) else 0,
+                         (ras_cols - upperleft_x - tile_cols + 1) if
+                         (ras_cols - upperleft_x - tile_cols + 1) < edge_buffer_x else 0,
 
-                             (ras_cols - upperleft_x - tile_cols + 1) if
-                             (ras_cols - upperleft_x - tile_cols + 1) < edge_buffer else 0,
-
-                             (ras_rows - upperleft_y - tile_rows + 1) if
-                             (ras_rows - upperleft_y - tile_rows + 1) < edge_buffer else 0]
-        else:
-            pixel_deficit = [0, 0, 0, 0]
+                         (ras_rows - upperleft_y - tile_rows + 1) if
+                         (ras_rows - upperleft_y - tile_rows + 1) < edge_buffer_y else 0]
 
         # corners
-        new_upperleft_x = (upperleft_x - edge_buffer) + pixel_deficit[0]
-        new_upperleft_y = (upperleft_y - edge_buffer) + pixel_deficit[1]
+        new_upperleft_x = (upperleft_x - edge_buffer_x) + pixel_deficit[0]
+        new_upperleft_y = (upperleft_y - edge_buffer_y) + pixel_deficit[1]
 
         # new block coordinates
         new_block_coords = [new_upperleft_x,
                             new_upperleft_y,
-                            tile_rows + (2 * edge_buffer - pixel_deficit[1] + pixel_deficit[3]),
-                            tile_cols + (2 * edge_buffer - pixel_deficit[0] + pixel_deficit[2])]
+                            tile_rows + (2 * edge_buffer_y - pixel_deficit[1] + pixel_deficit[3]),
+                            tile_cols + (2 * edge_buffer_x - pixel_deficit[0] + pixel_deficit[2])]
 
         tile_arr = np.zeros((len(bands),
                              new_block_coords[3],
@@ -1152,7 +1059,7 @@ class Raster(object):
                       bands=None,
                       get_array=True,
                       finite_only=True,
-                      edge_buffer=0,
+                      edge_buffer=None,
                       nan_replacement=None):
 
         """
@@ -1162,7 +1069,8 @@ class Raster(object):
         :param bands: List of bands to extract (default: None, gets all bands; Index starts at 0)
         :param get_array: If raster array should be retrieved as well
         :param finite_only: If only finite values should be returned
-        :param edge_buffer: Number of extra pixels to retrieve further out from the edges (default: 0)
+        :param edge_buffer: Tuple of extra pixels to retrieve further out from the edges (default: None)
+                            (edge_buf_x, edge_buf_y)
         :param nan_replacement: replacement for NAN values
         :return: Yields tuple: (tiepoint xy tuple, tile numpy array(2d array if only one band, else 3d array)
         """
@@ -1206,6 +1114,52 @@ class Raster(object):
 
             tile_counter += 1
 
+    def make_tiles(self,
+                   tile_size_x=1024,
+                   tile_size_y=1024,
+                   out_path=None,
+                   edge_buffer=None,
+                   **kwargs):
+
+        """
+        Make and write smaller tile tif files from the raster tif file
+        :param tile_size_y: Tile size along x
+        :param tile_size_x: tile size along y
+        :param edge_buffer: Buffer along the edges to include while making tiles
+                            Tuple of (edge_buf_x, edge_buf_y) in number of pixels
+        :param out_path: Output folder for the tiles
+        :returns: None
+        """
+        if out_path is None:
+            out_path = Handler(self.name).dirname
+
+        self.make_tile_grid(tile_size_x, tile_size_y)
+
+        tile_counter = 0
+        for tie_pt, tile_arr in self.get_next_tile(edge_buffer=edge_buffer):
+            block_coords = self.tile_grid[tile_counter]['block_coords']
+            out_file = out_path + Handler(Handler(self.name).basename)\
+                .add_to_filename('_{}'.format('_'.join([str(elem) for elem in block_coords])))
+
+            out_transform = [tie_pt[0],
+                             self.transform[1],
+                             self.transform[2],
+                             tie_pt[1],
+                             self.transform[4],
+                             self.transform[5]]
+
+            tile_ras = Raster(out_file,
+                              array=tile_arr,
+                              bnames=self.bnames,
+                              dtype=self.dtype,
+                              shape=tile_arr.shape,
+                              transform=out_transform,
+                              crs_string=self.crs_string)
+
+            tile_ras.write_to_file(**kwargs)
+            tile_ras = None
+            tile_counter += 1
+
     @staticmethod
     def index_geom_wkt(wkt_strings,
                        geom_ids=None,
@@ -1218,11 +1172,10 @@ class Raster(object):
         :param wkt_strings: List of OGR geometry wkt strings
         :param geom_ids: List of geometry ids corresponding to wkt_string list
         :param separate_multi_geom: (bool) Flag to separate multigeometries into smaller geometries
-        :returns: Dictionary {geom_id: geom_wkt, }
+        :returns: List of tuples [(geom_id: OGR geometry obj), ]
         """
 
-        id_geom_dict = dict()
-        geom_types = []
+        id_geom_list = []
 
         for wkt_string_indx, wkt_string in enumerate(wkt_strings):
             # multi geometry should be separated
@@ -1237,19 +1190,20 @@ class Raster(object):
                         geom_internal_id = '{}_{}'.format(str(wkt_string_indx), str(multi_geom_indx))\
                             if geom_ids is None else '{}_{}'.format(str(geom_ids[wkt_string_indx]),
                                                                     str(multi_geom_indx))
-                        id_geom_dict[geom_internal_id] = multi_geom.GetGeometryRef(multi_geom_indx)
+                        id_geom_list.append((geom_internal_id,
+                                             multi_geom.GetGeometryRef(multi_geom_indx)))
 
                 else:
                     # if no multi geometry in the string
-                    id_geom_dict[str(wkt_string_indx) if geom_ids is None else geom_ids[wkt_string_indx]] = \
-                        ogr.CreateGeometryFromWkt(wkt_string)
+                    id_geom_list.append((str(wkt_string_indx) if geom_ids is None else geom_ids[wkt_string_indx],
+                                         ogr.CreateGeometryFromWkt(wkt_string)))
 
             else:
                 # if multi geometry should not be separated
-                id_geom_dict[str(wkt_string_indx) if geom_ids is None else geom_ids[wkt_string_indx]] = \
-                    ogr.CreateGeometryFromWkt(wkt_string)
+                id_geom_list.append((str(wkt_string_indx) if geom_ids is None else geom_ids[wkt_string_indx],
+                                     ogr.CreateGeometryFromWkt(wkt_string)))
 
-        return id_geom_dict
+        return id_geom_list
 
     def extract_geom(self,
                      wkt_strings,
@@ -1349,7 +1303,7 @@ class Raster(object):
 
         # list of geometry indices and OGR SWIG geometry objects
         # each dict entry contains   geom_id : geom
-        id_geom_dict = self.index_geom_wkt(wkt_strings,
+        id_geom_list = self.index_geom_wkt(wkt_strings,
                                            geom_ids=geom_ids,
                                            separate_multi_geom=separate_multi_geom)
 
@@ -1358,8 +1312,10 @@ class Raster(object):
 
         # prepare dict struct
         out_geom_extract = dict()
-        for internal_id, _ in id_geom_dict.items():
+        for internal_id, _ in id_geom_list:
             out_geom_extract[internal_id] = {'values': [], 'coordinates': [], 'xyz_loc': []}
+
+        geom_id_order = list(internal_id for internal_id, _ in id_geom_list)
 
         # list of sample ids
         for tile in self.tile_grid:
@@ -1374,7 +1330,7 @@ class Raster(object):
             # check if the geometry intersects and
             # place all same geometry types together
             geom_by_type = {}
-            for samp_id, samp_geom in id_geom_dict.items():
+            for samp_id, samp_geom in id_geom_list:
                 if tile_geom.Intersects(samp_geom):
                     geom_type = samp_geom.GetGeometryType()
                     if geom_type not in geom_by_type:
@@ -1508,7 +1464,7 @@ class Raster(object):
 
                     out_geom_extract[geom_id] = geom_dict
 
-        return out_geom_extract
+        return list(out_geom_extract[internal_id] for internal_id in geom_id_order)
 
     def clip(self,
              cutline_file=None,
@@ -1886,6 +1842,17 @@ class MultiRaster:
 
             if verbose:
                 Opt.cprint('Writing layer stack file : {} ...'.format(outfile))
+
+            nodata = vrt_dict.pop('VRTNodata')
+            _ = vrt_dict.pop('srcNodata')
+            _ = vrt_dict.pop('hideNodata')
+            _ = vrt_dict.pop('separate')
+
+            if 'outputBounds' in vrt_dict:
+                _ = vrt_dict.pop('xRes')
+                _ = vrt_dict.pop('yRes')
+
+            vrt_dict['noData'] = nodata
 
             trns_opts = gdal.TranslateOptions(**vrt_dict)
 
