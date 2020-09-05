@@ -975,7 +975,7 @@ class Raster(object):
         """
 
         if edge_buffer is None:
-            edge_buffer_x, edge_buffer_y =  0, 0
+            edge_buffer_x, edge_buffer_y = 0, 0
         else:
             edge_buffer_x, edge_buffer_y = edge_buffer
 
@@ -1115,16 +1115,16 @@ class Raster(object):
             tile_counter += 1
 
     def make_tiles(self,
-                   tile_size_x=1024,
-                   tile_size_y=1024,
+                   tile_xsize=1024,
+                   tile_ysize=1024,
                    out_path=None,
                    edge_buffer=None,
                    **kwargs):
 
         """
         Make and write smaller tile tif files from the raster tif file
-        :param tile_size_y: Tile size along x
-        :param tile_size_x: tile size along y
+        :param tile_xsize: Tile size along x
+        :param tile_ysize: tile size along y
         :param edge_buffer: Buffer along the edges to include while making tiles
                             Tuple of (edge_buf_x, edge_buf_y) in number of pixels
         :param out_path: Output folder for the tiles
@@ -1133,10 +1133,11 @@ class Raster(object):
         if out_path is None:
             out_path = Handler(self.name).dirname
 
-        self.make_tile_grid(tile_size_x, tile_size_y)
-
         tile_counter = 0
-        for tie_pt, tile_arr in self.get_next_tile(edge_buffer=edge_buffer):
+        for tie_pt, tile_arr in self.get_next_tile(tile_xsize=tile_xsize,
+                                                   tile_ysize=tile_ysize,
+                                                   edge_buffer=edge_buffer):
+
             block_coords = self.tile_grid[tile_counter]['block_coords']
             out_file = out_path + Handler(Handler(self.name).basename)\
                 .add_to_filename('_{}'.format('_'.join([str(elem) for elem in block_coords])))
@@ -1147,6 +1148,8 @@ class Raster(object):
                              tie_pt[1],
                              self.transform[4],
                              self.transform[5]]
+
+            print(tile_arr.shape)
 
             tile_ras = Raster(out_file,
                               array=tile_arr,
@@ -1851,6 +1854,8 @@ class MultiRaster:
             if 'outputBounds' in vrt_dict:
                 _ = vrt_dict.pop('xRes')
                 _ = vrt_dict.pop('yRes')
+                ulx, lry, lrx, uly = vrt_dict['outputBounds']
+                vrt_dict['outputBounds'] = [ulx, uly, lrx, lry]
 
             vrt_dict['noData'] = nodata
 
