@@ -1259,6 +1259,15 @@ class Handler(object):
                      append=False,
                      header=True):
 
+        """
+        Method to write to a csv file
+        :param list_of_dicts: list of dictionaries to be written
+        :param outfile: output file name
+        :param delimiter: Delimiter examples : ,  ; |
+        :param append: If the output should be appended to an already exising file
+        :param header: If the header should be written
+        """
+
         if outfile is None:
             raise ValueError("No file name for writing")
 
@@ -1267,7 +1276,8 @@ class Handler(object):
 
         lines = list()
         if header:
-            lines.append(delimiter.join(list(list_of_dicts[0])))
+            lines.append(delimiter.join([str(elem) for elem in list(list_of_dicts[0])]))
+
         for data_dict in list_of_dicts:
             lines.append(delimiter.join(list(str(val) for _, val in data_dict.items())))
 
@@ -1297,8 +1307,8 @@ class Handler(object):
         """
         result = []
         # search for a given pattern in a folder path
-        if pattern == '*':
-            search_str = '*'
+        if '*' in pattern:
+            search_str = pattern
         else:
             search_str = '*' + pattern + '*'
 
