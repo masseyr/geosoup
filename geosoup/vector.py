@@ -9,8 +9,7 @@ from geosoup.exceptions import *
 __all__ = ['Vector',
            'OGR_FIELD_DEF',
            'OGR_TYPE_DEF',
-           'OGR_GEOM_DEF',
-           'OGR_FIELD_DEF_INV']
+           'OGR_GEOM_DEF']
 
 
 OGR_FIELD_DEF = {
@@ -18,15 +17,14 @@ OGR_FIELD_DEF = {
     'integer': ogr.OFTInteger,
     'long': ogr.OFTInteger,
     'float': ogr.OFTReal,
+    'real': ogr.OFTReal,
     'double': ogr.OFTReal,
     'str': ogr.OFTString,
     'string': ogr.OFTString,
     'bool': ogr.OFTInteger,
     'nonetype': ogr.OFSTNone,
-    'none': ogr.OFSTNone
-}
+    'none': ogr.OFSTNone}
 
-OGR_FIELD_DEF_INV = dict(list((v, k) for k, v in OGR_FIELD_DEF.items()))
 
 OGR_TYPE_DEF = {
             'point': 1,
@@ -37,8 +35,8 @@ OGR_TYPE_DEF = {
             'multilinestring': 5,
             'multipolygon': 6,
             'geometry': 0,
-            'no geometry': 100
-}
+            'no geometry': 100}
+
 
 OGR_GEOM_DEF = {
                 1: 'point',
@@ -48,8 +46,7 @@ OGR_GEOM_DEF = {
                 5: 'multilinestring',
                 6: 'multipolygon',
                 0: 'geometry',
-                100: 'no geometry',
-}
+                100: 'no geometry',}
 
 
 class Vector(object):
@@ -117,7 +114,7 @@ class Vector(object):
         self.nfeat = 0
         self.fields = list()
         self.data = dict()
-        self.attr_def = attr_def
+        self.attr_def = attr_def if attr_def is not None else dict()
         self.bounds = None
 
         self.mode = 'read' if not append else 'write'
@@ -174,7 +171,11 @@ class Vector(object):
 
             # get field defintions
             layer_definition = self.layer.GetLayerDefn()
-            self.fields = [layer_definition.GetFieldDefn(i) for i in range(0, layer_definition.GetFieldCount())]
+            self.fields = [layer_definition.GetFieldDefn(i)
+                           for i in range(0, layer_definition.GetFieldCount())]
+
+            self.attr_def = {field.GetName(): field.GetTypeName().lower()
+                             for field in self.fields}
 
             if not append:
 
@@ -302,9 +303,9 @@ class Vector(object):
             if attr_def is not None:
                 for attr_name, attr_type in attr_def.items():
                     temp_attr = ogr.FieldDefn(attr_name, OGR_FIELD_DEF[attr_type])
-                    if attr_type == 'str':
+                    if attr_type in ('str', 'string'):
                         temp_attr.SetWidth(self.width)
-                    if attr_type in ('float', 'int'):
+                    if attr_type in ('float', 'int', 'integer', 'long', 'real'):
                         temp_attr.SetPrecision(self.precision)
 
                     self.layer.CreateField(temp_attr)
@@ -414,6 +415,90 @@ class Vector(object):
             return Vector.ogr_data_type(converted_inp, _return)
 
     @staticmethod
+    def sizeof_ogr_datatype(type_number):
+        """
+        Method to determine the byte size of data types stored in CloudSQL
+        :param type_number: Data type code for Raster tile
+        :return: Size in bytes
+        """
+
+        if type_number == 1:
+            return 1
+        elif type_number == 2:
+            return 2
+        elif type_number == 3:
+            return 2
+        elif type_number == 4:
+            return 4
+        elif type_number == 5:
+            return 4
+        elif type_number == 6:
+            return 4
+        elif type_number == 7:
+            return 8
+        else:
+            raise ValueError("Unknown datatype code")
+
+    @staticmethod
+    def utm_zone_to_epsg(zone,
+                         hemisphere=None,
+                         tile=None):
+        """
+        Method to return EPSG SRID for UTM zone
+        :param zone: UTM zone
+        :param hemisphere: North or South hemishpere
+        :param tile: Tile IDs (ABCDEFGHJKLM for Northern hemisphere and NPQRSTUVWXYZ for southern)
+        :return: EPSG SRID with WGS84 datum
+        """
+        if hemisphere is not None:
+            if hemisphere == 'N':
+                return int('326' + str(zone).zfill(2))
+            elif hemisphere == 'S':
+                return int('327' + str(zone).zfill(2))
+            else:
+                raise ValueError('Invalid hemisphere label')
+        elif tile is not None:
+            if tile in 'NPQRSTUVWXYZ':
+                return int('326' + str(zone).zfill(2))
+            elif tile in 'ABCDEFGHJKLM':
+                return int('327' + str(zone).zfill(2))
+            else:
+                raise ValueError('Invalid tile label')
+
+    @staticmethod
+    def utm_zone_to_proj4(zone,
+                          hemisphere=None,
+                          tile=None,
+                          datum='WGS84'):
+        """
+        Method to return PROJ4 string for UTM zone
+        :param zone: UTM zone
+        :param hemisphere: North or South hemishpere
+        :param tile: Tile IDs (ABCDEFGHJKLM for Northern hemisphere and NPQRSTUVWXYZ for southern)
+        :param datum: Name of the datum used in the projection
+        :return: PROJ4 string
+        """
+        if hemisphere is not None:
+            if hemisphere == 'N':
+                return '+proj=utm +zone={z} +datum={d}'.format(z=str(zone),
+                                                               d=datum)
+            elif hemisphere == 'S':
+                return '+proj=utm +zone={z} +datum={d} +south'.format(z=str(zone),
+                                                                      d=datum)
+            else:
+                raise ValueError('Invalid hemisphere label')
+
+        elif tile is not None:
+            if tile in 'NPQRSTUVWXYZ':
+                return '+proj=utm +zone={z} +datum={d}'.format(z=str(zone),
+                                                               d=datum)
+            elif tile in 'ABCDEFGHJKLM':
+                return '+proj=utm +zone={z} +datum={d} +south'.format(z=str(zone),
+                                                                      d=datum)
+            else:
+                raise ValueError('Invalid tile label')
+
+    @staticmethod
     def wkt_from_coords(coords,
                         geom_type='point'):
 
@@ -457,26 +542,31 @@ class Vector(object):
 
     @staticmethod
     def get_osgeo_geom(geom_string,
-                       geom_type='wkt'):
+                       geom_type='wkt',
+                       buffer=None):
         """
         Method to return a osgeo geometry object
         :param geom_string: Wkt or json string
         :param geom_type: 'wkt', 'json', or 'wkb
+        :param buffer: Amount in geometry coordinates to buffer the geometry
         :return: osgeo geometry object
         """
         if geom_type == 'wkt':
             try:
-                return ogr.CreateGeometryFromWkt(geom_string)
+                return ogr.CreateGeometryFromWkt(geom_string) if buffer is None else \
+                    ogr.CreateGeometryFromWkt(geom_string).Buffer(buffer)
             except:
                 return
         elif geom_type == 'json':
             try:
-                return ogr.CreateGeometryFromJson(geom_string)
+                return ogr.CreateGeometryFromJson(geom_string) if buffer is None else \
+                    ogr.CreateGeometryFromJson(geom_string).Buffer(buffer)
             except:
                 return
         elif geom_type == 'wkb':
             try:
-                return ogr.CreateGeometryFromWkb(geom_string)
+                return ogr.CreateGeometryFromWkb(geom_string) if buffer is None else \
+                    ogr.CreateGeometryFromWkb(geom_string).Buffer(buffer)
             except:
                 return
         else:
@@ -573,6 +663,15 @@ class Vector(object):
 
         if remove:
             vector = None
+
+    @staticmethod
+    def to_json(wkt_string):
+        """
+        Method to convert wkt string to json
+        :return: string
+        """
+        geom = ogr.CreateGeometryFromWkt(wkt_string)
+        return geom.ExportToJson().replace('"', "'")
 
     def write_vector(self,
                      outfile=None,
@@ -1071,10 +1170,10 @@ class Vector(object):
                            spref=None,
                            spref_string=None,
                            spref_string_type='wkt',
-                           vector_type=None,
                            out_epsg=4326,
                            attributes=None,
                            attribute_types=None,
+                           primary_key='fid',
                            verbose=False):
         """
         Make a vector object from a list of geometries in string (json, wkt, or wkb) format.
@@ -1083,8 +1182,8 @@ class Vector(object):
         :param spref: OSR Spatial reference object
         :param spref_string: WKT representation of the spatial reference for the Vector object
         :param spref_string_type: Spatial reference string type (e.g. 'wkt', 'proj4', 'epsg'; default: 'wkt)
-        :param vector_type: Type of vector geometry (e.g. 'point','polygon','multipolygon','line'; default: 'polygon')
         :param out_epsg: EPSG SRID for the geometry object
+        :param primary_key: Primary key for features
         :param attributes: Dictionary or list of dictionaries of feature attributes.
                            The 'key' names in this list of dicts should match exactly with attribute_types
         :param attribute_types: Dictionary of feature attribute names with their OGR datatypes.
@@ -1103,23 +1202,30 @@ class Vector(object):
         else:
             raise TypeError("Unsupported geometry type")
 
+        first_geom = geom_func[geom_string_type](geom_strings[0])
+        vector_type = first_geom.GetGeometryName()
+
         vector = cls(name='vector_from_geom_list',
                      spref=spref,
                      spref_str=spref_string,
                      spref_str_type=spref_string_type,
                      epsg=out_epsg,
-                     geom_type=vector_type,
+                     geom_type=vector_type.lower(),
                      in_memory=True,
                      verbose=verbose,
-                     primary_key='fid',
+                     primary_key=primary_key,
                      attr_def=attribute_types)
 
         if verbose:
             Opt.cprint('Creating geometries in memory...\n')
 
         for indx, geom_string in enumerate(geom_strings):
-            vector.add_feat(geom_func[geom_string_type](geom_string),
-                            attr=attributes[indx])
+
+            if attributes is None:
+                vector.add_feat(geom_func[geom_string_type](geom_string))
+            else:
+                vector.add_feat(geom_func[geom_string_type](geom_string),
+                                attr=attributes[indx])
 
         if verbose:
             Opt.cprint('Created {} geometries'.format(str(vector.nfeat)))
@@ -1276,7 +1382,7 @@ class Vector(object):
                                   y_max,
                                   0,
                                   -1.0*pixel_size[1]))
-       
+
         target_ds.SetProjection(target_ds_srs.ExportToWkt())
 
         if attribute is not None:
