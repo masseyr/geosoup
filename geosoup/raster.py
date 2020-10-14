@@ -71,6 +71,7 @@ class Raster(object):
                  shape=None,
                  transform=None,
                  crs_string=None,
+                 nodatavalue=None,
                  datasource=None):
 
         self.array = array
@@ -96,7 +97,7 @@ class Raster(object):
             self.dtype = gdal.GDT_Float32
 
         self.metadict = metadict
-        self.nodatavalue = None
+        self.nodatavalue = nodatavalue
         self.tile_grid = list()
         self.ntiles = None
         self.bounds = None
@@ -585,6 +586,47 @@ class Raster(object):
 
             self.stats[self.bnames[ib]] = band_stats
 
+    def get_bands(self,
+                  bands,
+                  outfile=None,
+                  return_vrt=False,
+                  return_raster=True):
+        """
+        Method to return a raster or vrt with the specified bands or write a file if specified
+        :param bands: List of band indices or names, cannot be mixed (index starts at 0)
+        :param outfile: Output filename
+        :param return_vrt: If a vrt object should be returned
+        :param return_raster: If a Raster object should be returned
+        """
+
+        if not (isinstance(bands, list) or isinstance(bands, tuple)):
+            bands = [bands]
+
+        if type(bands[0]) == str:
+            bands = list(self.bnames.index(elem) + 1 for elem in bands)
+        else:
+            bands = [elem + 1 for elem in bands]
+
+        vrt_opts = gdal.BuildVRTOptions(bandList=bands)
+
+        vrt = gdal.BuildVRT('/vsimem/{}.vrt'.format(Opt.temp_name()),
+                            self.datasource,
+                            options=vrt_opts)
+
+        if outfile is not None:
+            gdal.Translate(outfile,
+                           vrt)
+            vrt = None
+            return
+        elif return_raster:
+            ras = Raster('bandSubsetRaster', datasource=vrt)
+            ras.initialize()
+            return ras
+        elif return_vrt:
+            return vrt
+        else:
+            raise RuntimeError("No further valid path")
+
     def rescale(self,
                 out_type=None,
                 rescale=False,
@@ -871,19 +913,19 @@ class Raster(object):
 
             if xmin < 0:
                 xmin = 0
-            if xmax > self.shape[2]:
-                xmax = self.shape[2]
+            if xmax >= self.shape[2]:
+                xmax = self.shape[2] - 1
             if ymin < 0:
                 ymin = 0
-            if ymax > self.shape[1]:
-                ymax = self.shape[1]
+            if ymax >= self.shape[1]:
+                ymax = self.shape[1] - 1
 
             if xmin >= xmax:
                 raise ImageProcessingError("Image x-size should be greater than 0")
             if ymin >= ymax:
                 raise ImageProcessingError("Image y-size should be greater than 0")
         else:
-            xmin, xmax, ymin, ymax = 0, self.shape[2], 0, self.shape[1]
+            xmin, xmax, ymin, ymax = 0, self.shape[2] - 1, 0, self.shape[1] - 1
 
         return xmin, xmax, ymin, ymax
 
@@ -923,13 +965,13 @@ class Raster(object):
             if y + tile_ysize < ymax:
                 rows = tile_ysize
             else:
-                rows = ymax - y
+                rows = ymax - y + 1
 
             for x in range(xmin, xmax, tile_xsize):
                 if x + tile_xsize < xmax:
                     cols = tile_xsize
                 else:
-                    cols = xmax - x
+                    cols = xmax - x + 1
 
                 tie_pt = self.get_coords([(x, y)],
                                          (self.transform[1], self.transform[5]),
@@ -960,7 +1002,7 @@ class Raster(object):
                  nodatavalue=-9999):
         """
         Method to get raster numpy array of a tile
-        :param bands: bands to get in the array, index starts from one. (default: all)
+        :param bands: bands to get in the array, index starts from 0. (default: all)
         :param finite_only:  If only finite values should be returned
         :param edge_buffer: Number of extra pixels to retrieve further out from the edges (default: None)
                            Tuple (buf_size_x, buf_size_y)
@@ -989,67 +1031,76 @@ class Raster(object):
                 nan_replacement = self.nodatavalue
 
         if bands is None:
-            bands = list(range(1, self.shape[0] + 1))
+            bands = list(range(0, self.shape[0]))
 
         if block_coords is None:
             raise ImageProcessingError("Block coords needed to retrieve tile")
         else:
-            upperleft_x, upperleft_y, tile_rows, tile_cols = block_coords
+            upperleft_x, upperleft_y, tile_cols, tile_rows = block_coords
 
         # raster shape param
         ras_rows, ras_cols = self.shape[1], self.shape[2]
 
         # accounting for number of pixels less than the required size (always >= 0)
         # pixel deficit on left, top, right, and bottom edges respectively
-        pixel_deficit = [(edge_buffer_x - upperleft_x) if (upperleft_x < edge_buffer_x) else 0,
+        pixel_deficit = [(edge_buffer_x - upperleft_x) if (upperleft_x < edge_buffer_x) else 0,  # left
 
-                         (edge_buffer_y - upperleft_y) if (upperleft_y < edge_buffer_y) else 0,
+                         (edge_buffer_y - upperleft_y) if (upperleft_y < edge_buffer_y) else 0,  # top
 
                          (ras_cols - upperleft_x - tile_cols + 1) if
-                         (ras_cols - upperleft_x - tile_cols + 1) < edge_buffer_x else 0,
+                         (ras_cols - upperleft_x - tile_cols + 1) < edge_buffer_x else 0,  # right
 
                          (ras_rows - upperleft_y - tile_rows + 1) if
-                         (ras_rows - upperleft_y - tile_rows + 1) < edge_buffer_y else 0]
+                         (ras_rows - upperleft_y - tile_rows + 1) < edge_buffer_y else 0]  # bottom
 
         # corners
         new_upperleft_x = (upperleft_x - edge_buffer_x) + pixel_deficit[0]
         new_upperleft_y = (upperleft_y - edge_buffer_y) + pixel_deficit[1]
 
-        # new block coordinates
+        # new block coordinates: xoffset, yoffset, xsize, ysize
+        # per https://gdal.org/python/osgeo.gdal.Dataset-class.html#ReadAsArray
         new_block_coords = [new_upperleft_x,
                             new_upperleft_y,
-                            tile_rows + (2 * edge_buffer_y - pixel_deficit[1] + pixel_deficit[3]),
-                            tile_cols + (2 * edge_buffer_x - pixel_deficit[0] + pixel_deficit[2])]
+                            tile_cols + (2 * edge_buffer_x - pixel_deficit[0] + pixel_deficit[2]),
+                            tile_rows + (2 * edge_buffer_y - pixel_deficit[1] + pixel_deficit[3])]
 
-        tile_arr = np.zeros((len(bands),
-                             new_block_coords[3],
-                             new_block_coords[2]),
-                            gdal_array.GDALTypeCodeToNumericTypeCode(self.dtype))
+        if self.array is None:
 
-        for jj, band in enumerate(bands):
-            read_success = True
-            for i_try in range(n_tries):
-                try:
-                    temp_band = self.datasource.GetRasterBand(band)
-                    tile_arr[jj, :, :] = temp_band.ReadAsArray(*new_block_coords)
-                    break
-                except RuntimeError as e:
-                    read_success = False
-                    Opt.cprint(e)
-                    Opt.cprint('Retrying failed read...attempt {}'.format(i_try + 1))
-                    time.sleep(random.random() + 1.0)
+            tile_arr = np.zeros((len(bands),
+                                 new_block_coords[3],
+                                 new_block_coords[2]),
+                                gdal_array.GDALTypeCodeToNumericTypeCode(self.dtype))
 
-            if not read_success:
-                Opt.cprint('Retrying failed with {} attempts...using no-data value'.format(str(n_tries)))
-                if self.nodatavalue is not None:
-                    tile_arr[jj, :, :] = self.nodatavalue
-                else:
-                    tile_arr[jj, :, :] = nodatavalue
+            for jj, band in enumerate(bands):
+                read_success = True
+                for i_try in range(n_tries):
+                    try:
+                        temp_band = self.datasource.GetRasterBand(band + 1)
+                        tile_arr[jj, :, :] = temp_band.ReadAsArray(*new_block_coords)
+                        break
+                    except RuntimeError as e:
+                        read_success = False
+                        Opt.cprint(e)
+                        Opt.cprint('Retrying failed read...attempt {}'.format(i_try + 1))
+                        time.sleep(random.random() + 1.0)
 
-        if finite_only:
-            if np.isnan(tile_arr).any() or np.isinf(tile_arr).any():
-                tile_arr[np.isnan(tile_arr)] = nan_replacement
-                tile_arr[np.isinf(tile_arr)] = nan_replacement
+                if not read_success:
+                    Opt.cprint('Retrying failed with {} attempts...using no-data value'.format(str(n_tries)))
+                    if self.nodatavalue is not None:
+                        tile_arr[jj, :, :] = self.nodatavalue
+                    else:
+                        tile_arr[jj, :, :] = nodatavalue
+
+            if finite_only:
+                if np.isnan(tile_arr).any() or np.isinf(tile_arr).any():
+                    tile_arr[np.isnan(tile_arr)] = nan_replacement
+                    tile_arr[np.isinf(tile_arr)] = nan_replacement
+
+        else:
+            bands = np.array([bands])
+            tile_arr = self.array[bands,
+                                  new_block_coords[1]:(new_block_coords[1] + new_block_coords[3]),
+                                  new_block_coords[0]:(new_block_coords[0] + new_block_coords[2])]
 
         return tile_arr
 
@@ -1088,14 +1139,12 @@ class Raster(object):
                 nan_replacement = self.nodatavalue
 
         if bands is None:
-            bands = range(1, int(self.shape[0]) + 1)
+            bands = range(0, int(self.shape[0]))
         elif type(bands) in (int, float):
             bands = [int(bands)]
         elif type(bands) in (list, tuple):
             if all(list(isinstance(elem, str) for elem in bands)):
                 bands = [self.bnames.index(elem) for elem in bands]
-            elif all(list(isinstance(elem, int) or isinstance(elem, float) for elem in bands)):
-                bands = [int(ib + 1) for ib in bands]
         else:
             raise ValueError('Unknown/unsupported data type for "bands" keyword')
 
@@ -1149,15 +1198,14 @@ class Raster(object):
                              self.transform[4],
                              self.transform[5]]
 
-            print(tile_arr.shape)
-
             tile_ras = Raster(out_file,
                               array=tile_arr,
                               bnames=self.bnames,
                               dtype=self.dtype,
                               shape=tile_arr.shape,
                               transform=out_transform,
-                              crs_string=self.crs_string)
+                              crs_string=self.crs_string,
+                              nodatavalue=self.nodatavalue)
 
             tile_ras.write_to_file(**kwargs)
             tile_ras = None
@@ -1341,7 +1389,7 @@ class Raster(object):
                     else:
                         geom_by_type[geom_type].append((samp_id, samp_geom))
 
-            # check is any geoms are available
+            # check if any geoms are available
             if len(geom_by_type) > 0:
                 for geom_type, geom_list in geom_by_type.items():
 
@@ -1469,14 +1517,14 @@ class Raster(object):
 
         return list(out_geom_extract[internal_id] for internal_id in geom_id_order)
 
-    def clip(self,
-             cutline_file=None,
-             cutline_blend=0,
-             outfile=None,
-             return_vrt=False,
-             return_vrt_dict=False,
-             cutline_as_mask=True,
-             **creation_options):
+    def clip_by_geom(self,
+                     cutline_file=None,
+                     cutline_blend=0,
+                     outfile=None,
+                     return_vrt=False,
+                     return_vrt_dict=False,
+                     cutline_as_mask=True,
+                     **creation_options):
         """
         Method to clip a raster to a given geometry/vector
         This method only supports clipping to the first layer in the datasource
@@ -1532,6 +1580,74 @@ class Raster(object):
             else:
                 vrt_ds = None
                 return Raster(outfile)
+
+    def clip_by_extent(self,
+                       xmin,
+                       ymin,
+                       xmax,
+                       ymax,
+                       outfile=None,
+                       verbose=False,
+                       **kwargs):
+        """
+        Method to clip a raster by its CRS extent - xmin, ymin, xmax, ymax
+        :param xmin: x coordinate of lower left corner
+        :param ymin: y coordinate of lower left corner
+        :param xmax: x coordinate of upper right corner
+        :param ymax y coordinate of upper right corner
+        :param outfile: output file name (geotiff). If 'None' then the output will be written to memory
+                        and this method will return a GDAL datasource object
+        :param verbose: If some of the steps should be displayed
+        :param kwargs: Keyword arguments (ignored if outfile is None):
+                            examples: compress='lzw', bigtiff='yes'
+        """
+
+        if not self.init:
+            self.initialize()
+
+        pxmin, pxmax, pymin, pymax = self.get_pixel_bounds(bound_coords=(xmin, xmax, ymin, ymax),
+                                                           coords_type='crs')
+
+        ncols = pxmax - pxmin + 1
+        nrows = pymax - pymin + 1
+
+        if verbose:
+            Opt.cprint('pxmin {}, pymin {}, pxmax {}, pymax {}, ncols {}, nrows {}'.format(str(pxmin),
+                                                                                           str(pymin),
+                                                                                           str(pymax),
+                                                                                           str(pymax),
+                                                                                           str(ncols),
+                                                                                           str(nrows)))
+
+        tile_arr = self.get_tile(block_coords=(pxmin, pymin, ncols, nrows))
+        transform = (xmin,
+                     self.transform[1],
+                     self.transform[2],
+                     ymax,
+                     self.transform[4],
+                     self.transform[5])
+
+        outras = Raster(outfile,
+                        array=tile_arr,
+                        bnames=self.bnames,
+                        dtype=self.dtype,
+                        shape=tile_arr.shape,
+                        transform=transform,
+                        crs_string=self.crs_string,
+                        nodatavalue=self.nodatavalue)
+
+        if verbose:
+            Opt.cprint(outras)
+
+        if outfile is None:
+            return outras.write_to_file(driver='MEM')
+
+        else:
+            outras.write_to_file(**kwargs)
+
+            if verbose:
+                Opt.cprint('Written: {}'.format(outfile))
+            return
 
     def reproject(self,
                   outfile=None,
@@ -1622,9 +1738,9 @@ class Raster(object):
         warp_dict['format'] = out_format
 
         if cutline_file is not None:
-            clip_opts = self.clip(cutline_file,
-                                  cutline_blend,
-                                  return_vrt_dict=True)
+            clip_opts = self.clip_by_geom(cutline_file,
+                                          cutline_blend,
+                                          return_vrt_dict=True)
 
             warp_dict.update(clip_opts)
 
@@ -1649,6 +1765,10 @@ class Raster(object):
             return warp_datasource
         else:
             vrt_ds = None
+
+    def close(self):
+        """Close the raster file handle from GDAL"""
+        self.datasource = None
 
 
 class MultiRaster:
@@ -1757,9 +1877,12 @@ class MultiRaster:
 
     def layerstack(self,
                    order=None,
+                   bands=None,
                    verbose=False,
                    outfile=None,
-                   return_vrt=True,
+                   return_vrt=False,
+                   write_vrt=False,
+                   extent='inclusive',
                    **kwargs):
 
         """
@@ -1767,7 +1890,10 @@ class MultiRaster:
         :param order: order of raster layerstack
         :param verbose: If some of the steps should be printed to console
         :param outfile: Name of the output file (.tif)
+        :param bands: list of band numbers (index start at 0)
+        :param extent: 'inclusive' or 'exclusive' for all the files in the stack
         :param return_vrt: If the file should be written to disk or vrt object should be returned
+        :param write_vrt: If the vrt file should be written to disk
         :return: None
 
         valid build vrt options in kwargs
@@ -1781,6 +1907,11 @@ class MultiRaster:
             order = list(range(len(self.rasters)))
 
         vrt_dict = dict()
+
+        if bands is not None:
+            vrt_dict['bandList'] = (np.array([bands]) + 1).tolist()
+        else:
+            vrt_dict['bandList'] = [1]
 
         if 'output_bounds' in kwargs:
             vrt_dict['outputBounds'] = kwargs['output_bounds']
@@ -1814,7 +1945,10 @@ class MultiRaster:
         if verbose:
             Opt.cprint('Getting bounds ...')
 
-        vrt_dict['outputBounds'] = self.get_extent(index=order)
+        intersection_dict = {'inclusive': False,
+                             'exclusive': True}
+        vrt_dict['outputBounds'] = self.get_extent(index=order,
+                                                   intersection=intersection_dict[extent])
         vrt_dict['separate'] = True
         vrt_dict['hideNodata'] = False
 
@@ -1824,42 +1958,31 @@ class MultiRaster:
         _vrt_opt_ = gdal.BuildVRTOptions(**vrt_dict)
 
         if outfile is None:
-            vrtfile = Handler(self.filelist[0]).dirname + Handler().sep + 'layerstack1.vrt'
+            return_vrt = True
             outfile = Handler(self.filelist[0]).dirname + Handler().sep + 'layerstack1.tif'
-        else:
+
+        if write_vrt:
             vrtfile = outfile.replace('.tif', '.vrt')
+        else:
+            vrtfile = '/vsimem/' + Opt.temp_name()
 
         _vrt_ = gdal.BuildVRT(vrtfile,
                               list(self.filelist[i] for i in order),
                               options=_vrt_opt_)
 
         if not return_vrt:
-
-            vrt_dict['creationOptions'] = []
+            trns_dict = {'creationOptions': []}
 
             if 'compress' in kwargs:
-                vrt_dict['creationOptions'].append('COMPRESS={}'.format(str(kwargs['compress']).upper()))
+                trns_dict['creationOptions'].append('COMPRESS={}'.format(str(kwargs['compress']).upper()))
 
             if 'bigtiff' in kwargs:
-                vrt_dict['creationOptions'].append('BIGTIFF={}'.format(str(kwargs['bigtiff']).upper()))
+                trns_dict['creationOptions'].append('BIGTIFF={}'.format(str(kwargs['bigtiff']).upper()))
 
             if verbose:
                 Opt.cprint('Writing layer stack file : {} ...'.format(outfile))
 
-            nodata = vrt_dict.pop('VRTNodata')
-            _ = vrt_dict.pop('srcNodata')
-            _ = vrt_dict.pop('hideNodata')
-            _ = vrt_dict.pop('separate')
-
-            if 'outputBounds' in vrt_dict:
-                _ = vrt_dict.pop('xRes')
-                _ = vrt_dict.pop('yRes')
-                ulx, lry, lrx, uly = vrt_dict['outputBounds']
-                vrt_dict['outputBounds'] = [ulx, uly, lrx, lry]
-
-            vrt_dict['noData'] = nodata
-
-            trns_opts = gdal.TranslateOptions(**vrt_dict)
+            trns_opts = gdal.TranslateOptions(**trns_dict)
 
             gdal.Translate(outfile,
                            _vrt_,
@@ -1972,6 +2095,7 @@ class MultiRaster:
                verbose=False,
                outfile=None,
                nodata_values=None,
+               bands=None,
                blend_pixels=10,
                blend_cutline=None,
                add_overviews=False,
@@ -1987,6 +2111,7 @@ class MultiRaster:
                              nodata bands for each image to be mosaicked
         :param blend_pixels: width of pixels to blend around the cutline or
                      raster boundary for multiple rasters (default: 10)
+        :param bands: List of band indices (index starts at 0)
         :param blend_cutline: vector file (shapefile) in memory or on disk
                               to use for blending
         :param add_overviews: If overviews should be added to the resulting image
@@ -2042,9 +2167,7 @@ class MultiRaster:
         if verbose:
             Opt.cprint('Files: \n{}'.format('\n'.join(list(self.filelist[i] for i in order))))
 
-        warp_dict = {}
-
-        warp_dict['options'] = []
+        warp_dict = {'options': []}
 
         output_res = max(list(np.abs(self.resolutions[i][0]) for i in order))
 
@@ -2105,8 +2228,15 @@ class MultiRaster:
 
         warp_opts = gdal.WarpOptions(**warp_dict)
 
+        if bands is not None:
+            filelist = list(ras.get_bands(bands,
+                                          return_vrt=True,
+                                          return_raster=False) for ras in self.rasters)
+        else:
+            filelist = self.filelist
+
         warp_datasource = gdal.Warp(outfile,
-                                    self.filelist,
+                                    filelist,
                                     options=warp_opts)
 
         if add_overviews:
