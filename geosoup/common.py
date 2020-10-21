@@ -1,9 +1,11 @@
-from decimal import Decimal, getcontext
 from itertools import takewhile, repeat
 from functools import wraps
+from uuid import uuid4
+from decimal import *
 import numpy as np
 import datetime
 import logging
+import socket
 import fnmatch
 import random
 import psutil
@@ -801,6 +803,23 @@ class Handler(object):
         if self.file_exists():
             os.remove(self.filename)
 
+    def array2d_to_file(self,
+                        array,
+                        sep=",",
+                        action="w"):
+        """
+        Method to write a numpy array to text file
+        :param array: Numpy ndarray
+        :param sep: Separator between array items for text output.
+                    If "" (empty), a binary file is written, equivalent to file.write(a.tobytes())
+        :param action: "w" for write, "a" for append, "r" for read
+        :return: None
+        """
+        with open(self.filename, action) as f:
+            for row in array:
+                row_str = sep.join([str(elem) for elem in row]) + '\n'
+                f.write(row_str)
+
     def copy_file(self,
                   other_dir,
                   replace=True,
@@ -1152,145 +1171,145 @@ class Handler(object):
         if verbose:
             sys.stdout.write('Lines in file: {}\n'.format(str(n_lines)))
 
-        if read_random:
-            if 0.0 < percent_random <= 100.0:
-                if verbose:
-                    sys.stdout.write('Randomizing index ... \n')
-                n_rand_lines = int((float(percent_random) / 100.0) * float(n_lines))
-                index_list = sorted([0] + Sublist(range(1, n_lines)).random_selection(num=n_rand_lines,
-                                                                                      systematic=systematic))
-        if verbose:
-            sys.stdout.write('Reading file : ')
-
         counter = 0
-        perc_ = 0
+        err_counter = 0
+        colnames = None
         with open(self.filename, 'r') as f:
-            if line_limit:
-                if len(index_list) > 0:
-                    if 0 < len(index_list) <= line_limit:
-                        pass
-                    elif len(index_list) > line_limit:
-                        index_list = index_list[:(line_limit + 1)]
 
-                    for i, line in enumerate(f):
-                        if counter > line_limit:
-                            break
-                        if i == index_list[counter]:
+            if not read_random:
+                if line_limit is None:
+                    for line in f:
+                        if counter == 0:
+                            colnames = list(elem.strip() for elem in line.split(','))
+                        elif len(line.split(',')) != len(colnames):
+                            err_counter += 1
+                        else:
                             lines.append(list(elem.strip() for elem in line.split(',')))
-                            counter += 1
-
-                            if counter > int((float(perc_) / 100.0) * float(len(index_list))):
-                                if verbose:
-                                    sys.stdout.write('{}..'.format(str(perc_)))
-                                perc_ += 10
-                    if verbose:
-                        sys.stdout.write('!\n')
+                        counter += 1
 
                 else:
                     for line in f:
-                        if counter > line_limit:
+                        if counter == 0:
+                            colnames = list(elem.strip() for elem in line.split(','))
+                        elif len(line.split(',')) != len(colnames):
+                            err_counter += 1
+                        elif counter <= line_limit:
+                            lines.append(list(elem.strip() for elem in line.split(',')))
+                        else:
                             break
-                        lines.append(list(elem.strip() for elem in line.split(',')))
                         counter += 1
-
-                        if counter > int((float(perc_) / 100.0) * float(line_limit)):
-                            if verbose:
-                                sys.stdout.write('{}..'.format(str(perc_)))
-                            perc_ += 10
-                    if verbose:
-                        sys.stdout.write('!\n')
 
             else:
-                if len(index_list) > 0:
+                if percent_random > 100.0:
+                    percent_random = 100.0
+                elif percent_random < 0.0:
+                    percent_random = 0.0
+                n_rand_lines = int((float(percent_random) / 100.0) * float(n_lines))
 
-                    for i, line in enumerate(f):
-                        if counter >= len(index_list):
-                            break
+                if n_rand_lines == 0:
+                    lines = []
+                else:
+                    if n_rand_lines == n_lines:
+                        index_list = list(range(0, n_lines))
+                    else:
+                        index_list = sorted([0] + Sublist(range(1, n_lines)).random_selection(num=n_rand_lines,
+                                                                                              systematic=systematic))
+                    if line_limit is not None:
+                        if n_rand_lines > line_limit:
+                            index_list = index_list[:line_limit]
 
-                        if index_list[counter] == i:
+                    for il, line in enumerate(f):
+                        if counter == 0:
+                            colnames = list(elem.strip() for elem in line.split(','))
+                            counter += 1
+                        elif len(line.split(',')) != len(colnames):
+                            err_counter += 1
+                        elif il == index_list[counter]:
                             lines.append(list(elem.strip() for elem in line.split(',')))
                             counter += 1
 
-                            if counter > int((float(perc_) / 100.0) * float(len(index_list))):
-                                if verbose:
-                                    sys.stdout.write('{}..'.format(str(perc_)))
-                                perc_ += 10
-                    if verbose:
-                        sys.stdout.write('!\n')
-
-                else:
-                    for line in f:
-                        lines.append(list(elem.strip() for elem in line.split(',')))
-                        counter += 1
-
-                        if counter > int((float(perc_) / 100.0) * float(n_lines)):
-                            if verbose:
-                                sys.stdout.write('{}..'.format(str(perc_)))
-                            perc_ += 10
-                    if verbose:
-                        sys.stdout.write('!\n')
-
-        # convert col names to list of strings
-        names = list(elem.strip() for elem in lines[0])
+        if verbose:
+            Opt.cprint('Encountered {} errors in reading file: {}'.format(str(err_counter),
+                                                                          self.basename))
 
         if len(lines) > 0:
             # convert to list
             if return_dicts:
                 if verbose:
                     sys.stdout.write('Converting to Dictionaries...\n')
-                return list(dict(zip(names, list(self.string_to_type(elem) for elem in feat)))
+                return list(dict(zip(colnames, list(self.string_to_type(elem) for elem in feat)))
                             for feat in lines[1:])
             else:
                 return {
                     'feature': list(list(self.string_to_type(elem) for elem in feat)
                                     for feat in lines[1:]),
-                    'name': names,
+                    'name': colnames,
                 }
         else:
             return {
-                'feature': list(),
-                'name': list(),
+                'feature': [],
+                'name': [],
             }
 
     @staticmethod
     def write_to_csv(list_of_dicts,
                      outfile=None,
-                     delimiter=',',
                      append=False,
-                     header=True):
+                     null_value=None,
+                     delimiter=','):
 
         """
         Method to write to a csv file
         :param list_of_dicts: list of dictionaries to be written
         :param outfile: output file name
+        :param null_value: Value to substitute if column is not available in a dict
         :param delimiter: Delimiter examples : ,  ; |
         :param append: If the output should be appended to an already exising file
-        :param header: If the header should be written
         """
 
         if outfile is None:
             raise ValueError("No file name for writing")
 
-        if type(list_of_dicts).__name__ not in ('tuple', 'list'):
+        if type(list_of_dicts) not in (tuple, list):
             list_of_dicts = [list_of_dicts]
-
-        lines = list()
-        if header:
-            lines.append(delimiter.join([str(elem) for elem in list(list_of_dicts[0])]))
-
-        for data_dict in list_of_dicts:
-            lines.append(delimiter.join(list(str(val) for _, val in data_dict.items())))
 
         if append:
             if os.path.isfile(outfile):
+                with open(outfile, 'r') as f:
+                    colname_string = f.readline().strip()
+                if len(colname_string) > 0:
+                    colnames = [elem.strip() for elem in colname_string.split(delimiter)]
+                    lines = list(delimiter.join(list(str(elem_dict[colname]) if colname in elem_dict
+                                                     else str(null_value)
+                                                     for colname in colnames))
+                                 for elem_dict in list_of_dicts)
+                else:
+                    colnames = list(list_of_dicts[0].keys())
+                    lines = [delimiter.join(list(str(colname) for colname in colnames))] + \
+                        list(delimiter.join(list(str(elem_dict[colname]) if colname in elem_dict
+                                                 else str(null_value)
+                                                 for colname in colnames))
+                             for elem_dict in list_of_dicts)
                 with open(outfile, 'a') as f:
                     for line in lines:
                         f.write(line + '\n')
             else:
+                colnames = list(list_of_dicts[0].keys())
+                lines = [delimiter.join(list(str(colname) for colname in colnames))] + \
+                    list(delimiter.join(list(str(elem_dict[colname]) if colname in elem_dict
+                                             else str(null_value)
+                                             for colname in colnames))
+                         for elem_dict in list_of_dicts)
                 with open(outfile, 'w') as f:
                     for line in lines:
                         f.write(line + '\n')
         else:
+            colnames = list(list_of_dicts[0].keys())
+            lines = [delimiter.join(list(str(colname) for colname in colnames))] + \
+                list(delimiter.join(list(str(elem_dict[colname]) if colname in elem_dict
+                                         else str(null_value)
+                                         for colname in colnames))
+                     for elem_dict in list_of_dicts)
             with open(outfile, 'w') as f:
                 for line in lines:
                     f.write(line + '\n')
@@ -1381,6 +1400,7 @@ class Opt:
         Instantiate Opt class
         """
         self.obj = obj  # mutable object
+        self.hex = uuid4().get_hex()
 
     def __repr__(self):
         return "<Optional notice class>"
@@ -1446,8 +1466,225 @@ class Opt:
         """
         Generate a temperory name based on current machine time with a .tmp extension
         """
-        return 'T' + datetime.datetime.now().isoformat().replace(':', '')\
+        return 'T{}'.format(np.random.random().hex()) + \
+               datetime.datetime.now().isoformat().replace(':', '')\
             .replace('.', '').replace('-', '').replace('T', '') + '.tmp'
+
+    @staticmethod
+    def lists_to_dict(value_list=None,
+                      column_list=None):
+        """
+        Constructs a dictionary from two lists
+        :param value_list: list of values in a dictionary
+        :param column_list: list of dictionary keys
+        :return: Dictionary
+        """
+        if column_list is not None:
+            if len(value_list) != len(column_list):
+                raise ValueError("Returned query does not match column list")
+            else:
+                return dict(zip(column_list,
+                                value_list))
+
+        else:
+            return dict(zip(['column' + str(i + 1) for i in range(0, len(value_list))],
+                            value_list))
+
+    @staticmethod
+    def dtype(input_data):
+
+        """
+        Method to output data type as string
+        :param input_data: input data
+        :return: string
+        """
+        try:
+            val = type(input_data).__name__
+        except (ValueError, SyntaxError):
+            val = None
+
+        return val
+
+    @staticmethod
+    def list_size(query_list):
+        """
+        Find size of a list object even if it is a one element non-list
+        :param query_list:
+        """
+
+        if isinstance(query_list, list):
+            return len(query_list)
+        else:
+            return 1
+
+    @staticmethod
+    def remove_strings(main_str, remove_str_list):
+        """
+        Remove a list of strings from a given string
+        :param main_str: Input string
+        :param remove_str_list: List of strings to be removed
+        :return:
+        """
+        temp = ''
+        for i in range(0, len(remove_str_list)):
+
+            # split the strings
+            temp_strings = main_str.split(remove_str_list[i])
+
+            # remove the string and rejoin
+            if remove_str_list[i] != '\n':
+                temp = ''.join(list(string for string in temp_strings))
+            else:
+                temp = '\n'.join(list(string for string in temp_strings if string != ''))
+
+            # reassign
+            main_str = temp
+
+        return temp
+
+    @staticmethod
+    def hostname():
+        """
+        Method to print machine hostname
+        :return: String
+        """
+        return socket.gethostname()
+
+    @staticmethod
+    def copy_item(item):
+        return copy.deepcopy(item)
+
+    @staticmethod
+    def growth_curve(n,
+                     maxn=100,
+                     mi=8):
+        """
+        Method to emulate growth curve. This is used to determine
+        number of compute nodes as number of operations increase
+        :param n: Number of operations required
+        :param maxn: Maximum value of output
+        :param mi: A coefficient (default: 8)
+        :return: Integer
+        """
+        x = n
+        mx = maxn
+        y = mx * (lambda t: (1 + mx ** (-1.25 * t / mi - 0.5)) **
+                            (-1.0))((float(2.0 * x - mi * mx)) / mx)
+        return int(np.floor(y))
+
+    @staticmethod
+    def ymd_to_yday(ymd_string):
+        """
+        Method to return tuple of (julian day, year) from date of format YYYY-MM-DD
+        :param ymd_string: String with date format YYYY-MM-DD
+        :return: Tuple (julian day, year)
+        """
+
+        date = datetime.datetime.strptime(ymd_string, '%Y-%m-%d')
+        tt = date.timetuple()
+        return tt.tm_yday, date.year
+
+    @staticmethod
+    def is_leap(year):
+        """
+        Method to determine if a year is leap or not
+        :param year: Year
+        :return: Boolean (True or False)
+        """
+        return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+
+    @staticmethod
+    def get_date_ranges(start_date, end_date):
+        """
+        Method to convert date string of the format YYYY-MM-DD to list of julian day ranges per year
+        :param start_date: date of format YYYY-MM-DD
+        :param end_date: date of format YYYY-MM-DD
+        :return: List of dictionaries of format {'start': 150, 'end': 210 , 'year': 2017 }
+        """
+
+        start_jday, start_year = Opt.ymd_to_yday(start_date)
+        end_jday, end_year = Opt.ymd_to_yday(end_date)
+
+        n_years = end_year - start_year + 1
+
+        if n_years == 1:
+            dates = [{'start': start_jday,
+                      'end': end_jday,
+                      'year': start_year}]
+
+        elif n_years > 1:
+            dates = list()
+
+            start_dict = {'start': start_jday,
+                          'end': 365,
+                          'year': start_year}
+
+            if Opt.is_leap(start_year):
+                start_dict['end'] = 366
+
+            dates.append(start_dict)
+
+            for i in range(0, n_years - 2):
+
+                temp_dict = {'start': 1,
+                             'end': 365,
+                             'year': start_year + i + 1}
+
+                if Opt.is_leap(start_year + i + 1):
+                    temp_dict['end'] = 366
+
+                dates.append(temp_dict)
+
+            end_dict = {'start': 1,
+                        'end': end_jday,
+                        'year': end_year}
+
+            if Opt.is_leap(end_year):
+                end_dict['end'] = 366
+
+            dates.append(end_dict)
+
+        else:
+            raise ValueError("Invalid dates or bad count")
+
+        return dates
+
+    @staticmethod
+    def custom_list(start,
+                    end,
+                    step=None):
+        """
+        List with custom first number but rest all follow same increment; integers only
+        :param start: starting integer
+        :param end: ending integer
+        :param step: step integer
+        :return: list of integers
+        """
+
+        # end of list
+        end = end + step - (end % step)
+
+        # initialize the list
+        out = list()
+
+        # make iterator
+        if step is not None:
+            if start % step > 0:
+                out.append(start)
+                if start < step:
+                    start = step
+                elif start > step:
+                    start = start + step - (start % step)
+            iterator = range(start, end, step)
+        else:
+            step = 1
+            iterator = range(start, step, end)
+
+        # add the rest of the list to out
+        for i in iterator:
+            out.append(i)
+
+        return out
 
 
 class FTPHandler(Handler):
