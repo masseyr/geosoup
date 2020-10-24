@@ -1340,6 +1340,11 @@ class Raster(object):
         else:
             replace = False
 
+        if 'verbose' in kwargs:
+            verbose = kwargs['verbose']
+        else:
+            verbose = False
+
         # define band order
         if band_order is None:
             band_order = list(range(0, self.shape[0]))
@@ -1347,6 +1352,9 @@ class Raster(object):
         # initialize raster
         if not self.init or self.array is None:
             self.initialize()
+
+        if verbose:
+            Opt.cprint(self.__repr__())
 
         # make wkt strings into a list
         if type(wkt_strings) not in (list, tuple):
@@ -1361,6 +1369,9 @@ class Raster(object):
         # make internal tiles
         self.make_tile_grid(*tile_size)
 
+        if verbose:
+            Opt.cprint('Processing {} tiles: '.format(len(self.tile_grid)))
+
         # prepare dict struct
         out_geom_extract = dict()
         for internal_id, _ in id_geom_list:
@@ -1369,7 +1380,12 @@ class Raster(object):
         geom_id_order = list(internal_id for internal_id, _ in id_geom_list)
 
         # list of sample ids
-        for tile in self.tile_grid:
+        for tile_indx, tile in enumerate(self.tile_grid):
+
+            if verbose:
+                Opt.cprint('Processing tile {} with dimensions {}x{}'.format(str(tile_indx + 1),
+                                                                             str(tile['block_coords'][3]),
+                                                                             str(tile['block_coords'][2])), ' ')
 
             # create tile geometry from bounds
             tile_geom = ogr.CreateGeometryFromWkt('POLYGON(({}))'.format(', '.join(list(' '.join([str(x), str(y)])
@@ -1380,14 +1396,19 @@ class Raster(object):
 
             # check if the geometry intersects and
             # place all same geometry types together
+            geom_counter = 0
             geom_by_type = {}
             for samp_id, samp_geom in id_geom_list:
                 if tile_geom.Intersects(samp_geom):
+                    geom_counter += 1
                     geom_type = samp_geom.GetGeometryType()
                     if geom_type not in geom_by_type:
                         geom_by_type[geom_type] = [(samp_id, samp_geom)]
                     else:
                         geom_by_type[geom_type].append((samp_id, samp_geom))
+
+            if verbose:
+                Opt.cprint('extracting {} geometries ...'.format(str(geom_counter)))
 
             # check if any geoms are available
             if len(geom_by_type) > 0:
