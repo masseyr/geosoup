@@ -57,6 +57,17 @@ OGR_TYPE_DEF = {
 }
 
 
+OGR_GEOM_DEF = {
+                1: 'point',
+                2: 'line',
+                3: 'polygon',
+                4: 'multipoint',
+                5: 'multilinestring',
+                6: 'multipolygon',
+                0: 'geometry',
+                100: 'no geometry'}
+
+
 class Raster(object):
     """
     Class to read and write rasters from/to files and numpy arrays
@@ -1300,6 +1311,8 @@ class Raster(object):
         todo: Implement separation of overlapping feature extractions
 
         """
+        max_burn_chunks = 65534  # gdal cannot burn more than this number to a layer (rasterization)
+
         if band_order is None:
             band_order = list(range(self.shape[0]))
 
@@ -1373,9 +1386,8 @@ class Raster(object):
             Opt.cprint('Processing {} tiles: '.format(len(self.tile_grid)))
 
         # prepare dict struct
-        out_geom_extract = dict()
-        for internal_id, _ in id_geom_list:
-            out_geom_extract[internal_id] = {'values': [], 'coordinates': [], 'xyz_loc': []}
+        out_geom_extract = {internal_id: {'values': [], 'coordinates': [], 'xyz_loc': []}
+                            for internal_id, _ in id_geom_list}
 
         geom_id_order = list(internal_id for internal_id, _ in id_geom_list)
 
@@ -1408,7 +1420,12 @@ class Raster(object):
                         geom_by_type[geom_type].append((samp_id, samp_geom))
 
             if verbose:
-                Opt.cprint('extracting {} geometries ...'.format(str(geom_counter)))
+                Opt.cprint('extracting {} geometries ...'.format(str(geom_counter)), ' ')
+                prnt_str_list = []
+                for k, v in geom_by_type.items():
+                    prnt_str_list.append('{} : {}'.format(str(OGR_GEOM_DEF[k]),
+                                                          str(len(v))))
+                Opt.cprint(', '.join(prnt_str_list))
 
             # check if any geoms are available
             if len(geom_by_type) > 0:
@@ -1418,90 +1435,107 @@ class Raster(object):
                     _, _, rows, cols = tile['block_coords']
                     tie_pt_x, tie_pt_y = tile['tie_point']
 
-                    # create tile empty raster in memory
-                    target_ds = gdal.GetDriverByName('MEM').Create('tmp',
-                                                                   cols,
-                                                                   rows,
-                                                                   1,
-                                                                   gdal.GDT_UInt16)
+                    # divide into chunks if more than max_burn_chunks
+                    if len(geom_list) > max_burn_chunks:
+                        n_chunks = int(np.ceil(len(geom_list) / max_burn_chunks))
+                        chunks = list(geom_list[(chunk_indx * max_burn_chunks): ((chunk_indx+1) * max_burn_chunks)]
+                                      if (chunk_indx < (n_chunks-1)) else geom_list[(chunk_indx * max_burn_chunks):]
+                                      for chunk_indx in range(n_chunks))
+                    else:
+                        chunks = [geom_list]
 
-                    # set pixel size and tie point
-                    target_ds.SetGeoTransform((tie_pt_x,
-                                               self.transform[1],
-                                               0,
-                                               tie_pt_y,
-                                               0,
-                                               self.transform[5]))
+                    for chunk in chunks:
+                        chunk_geom_list = list([indx, elem[1]] for indx, elem in enumerate(chunk))
+                        chunk_indx_geom_indx_relation = {indx: elem[0] for indx, elem in enumerate(chunk)}
 
-                    # set raster projection
-                    target_ds.SetProjection(self.crs_string)
+                        # create tile empty raster in memory
+                        target_ds = gdal.GetDriverByName('MEM').Create('tmp',
+                                                                       cols,
+                                                                       rows,
+                                                                       1,
+                                                                       gdal.GDT_UInt16)
 
-                    # create vector in memory
-                    burn_driver = ogr.GetDriverByName('Memory')
-                    burn_datasource = burn_driver.CreateDataSource('mem_source')
-                    burn_spref = osr.SpatialReference()
-                    burn_spref.ImportFromWkt(self.crs_string)
-                    burn_layer = burn_datasource.CreateLayer('tmp_lyr',
-                                                             srs=burn_spref,
-                                                             geom_type=geom_type)
+                        # set pixel size and tie point
+                        target_ds.SetGeoTransform((tie_pt_x,
+                                                   self.transform[1],
+                                                   0,
+                                                   tie_pt_y,
+                                                   0,
+                                                   self.transform[5]))
 
-                    # attributes
-                    fielddefn = ogr.FieldDefn('fid', ogr.OFTInteger)
-                    result = burn_layer.CreateField(fielddefn)
-                    layerdef = burn_layer.GetLayerDefn()
+                        # set raster projection
+                        target_ds.SetProjection(self.crs_string)
 
-                    geom_burn_val = 1
-                    geom_dict = {}
-                    for geom_id, geom in geom_list:
-                        # create features in layer
-                        temp_feature = ogr.Feature(layerdef)
-                        temp_feature.SetGeometry(geom)
-                        temp_feature.SetField('fid', geom_burn_val)
-                        burn_layer.CreateFeature(temp_feature)
-                        geom_dict[geom_burn_val] = geom_id
-                        geom_burn_val += 1
+                        # create vector in memory
+                        burn_driver = ogr.GetDriverByName('Memory')
+                        burn_datasource = burn_driver.CreateDataSource('mem_source')
+                        burn_spref = osr.SpatialReference()
+                        burn_spref.ImportFromWkt(self.crs_string)
+                        burn_layer = burn_datasource.CreateLayer('tmp_lyr',
+                                                                 srs=burn_spref,
+                                                                 geom_type=geom_type)
 
-                    gdal.RasterizeLayer(target_ds,
-                                        [1],
-                                        burn_layer,
-                                        None,  # transformer
-                                        None,  # transform
-                                        [1],
-                                        ['ALL_TOUCHED=TRUE',
-                                         'ATTRIBUTE=FID'])
+                        # attributes
+                        primary_field = ogr.FieldDefn('fid', ogr.OFTInteger)
+                        result = burn_layer.CreateField(primary_field)
+                        layerdef = burn_layer.GetLayerDefn()
 
-                    # read mask band as array
-                    temp_band = target_ds.GetRasterBand(1)
-                    mask_arr = temp_band.ReadAsArray()
+                        geom_burn_val = 1
+                        geom_dict = {}  # dict of burn val: geom id
+                        for geom_id, geom in chunk_geom_list:
+                            # create features in layer
+                            temp_feature = ogr.Feature(layerdef)
+                            temp_feature.SetGeometry(geom)
+                            temp_feature.SetField('fid', geom_burn_val)
+                            burn_layer.CreateFeature(temp_feature)
+                            geom_dict[geom_burn_val] = geom_id
+                            geom_burn_val += 1
 
-                    min_burn_val = min(list(geom_dict.keys()))
-                    max_burn_val = max(list(geom_dict.keys()))
+                        gdal.RasterizeLayer(target_ds,
+                                            [1],
+                                            burn_layer,
+                                            None,  # transformer
+                                            None,  # transform
+                                            [0],
+                                            ['ALL_TOUCHED=TRUE',
+                                             'ATTRIBUTE=FID'])
 
-                    pixel_xy_loc = np.where((mask_arr >= min_burn_val) & (mask_arr <= max_burn_val))
-                    burn_vals = mask_arr[pixel_xy_loc]
-                    pixel_xy_loc_list = np.array(list(zip(*pixel_xy_loc)))
+                        # read mask band as array
+                        temp_band = target_ds.GetRasterBand(1)
+                        mask_arr = temp_band.ReadAsArray()
 
-                    burn_dict = {}
-                    for geom_burn_val in range(min_burn_val, max_burn_val + 1):
-                        burn_dict[geom_burn_val] = pixel_xy_loc_list[np.where(burn_vals == geom_burn_val)].tolist()
+                        min_burn_val = min(list(geom_dict.keys()))
+                        max_burn_val = max(list(geom_dict.keys()))
 
-                    for geom_burn_val, geom_id in geom_dict.items():
-                        # make list of unmasked pixels
-                        if pass_pixel_coords:
-                            # get coordinates
-                            out_geom_extract[geom_id]['coordinates'] += self.get_coords(burn_dict[geom_burn_val],
-                                                                                        (self.transform[1],
-                                                                                         self.transform[5]),
-                                                                                        tile['tie_point'],
-                                                                                        pixel_center)
+                        pixel_xy_loc = np.where((mask_arr >= min_burn_val) & (mask_arr <= max_burn_val))
+                        burn_vals = mask_arr[pixel_xy_loc]
+                        pixel_xy_loc_arr = np.array(list(zip(*pixel_xy_loc)))
 
-                        # get band values from tile array
-                        out_geom_extract[geom_id]['values'] += list(tile_arr[band_order, x, y].tolist()
-                                                                    for x, y in burn_dict[geom_burn_val])
+                        burn_dict = {}
+                        for geom_burn_val in range(min_burn_val, max_burn_val + 1):
+                            burn_dict[geom_burn_val] = pixel_xy_loc_arr[np.where(burn_vals == geom_burn_val)].tolist()
+                            temp_loc = np.where(burn_vals == geom_burn_val)
+                            if temp_loc[0].shape[0] > 1:
+                                print(geom_burn_val, temp_loc[0].shape[0])
 
-                        out_geom_extract[geom_id]['xyz_loc'] += list([[band_index] + list(xy_loc)]
-                                                                     for xy_loc in burn_dict[geom_burn_val]
-                                                                     for band_index in band_order)
+                        for geom_burn_val, geom_id in geom_dict.items():
+                            # convert chunk geom id to actual/global geom id
+                            actual_geom_id = chunk_indx_geom_indx_relation[geom_id]
+
+                            if pass_pixel_coords:
+                                # get coordinates
+                                out_geom_extract[actual_geom_id]['coordinates'] += \
+                                    self.get_coords(burn_dict[geom_burn_val],
+                                                    (self.transform[1], self.transform[5]),
+                                                    tile['tie_point'],
+                                                    pixel_center)
+                            # get band values from tile array
+                            out_geom_extract[actual_geom_id]['values'] += list(tile_arr[band_order, x, y].tolist()
+                                                                               for x, y in burn_dict[geom_burn_val])
+
+                            out_geom_extract[actual_geom_id]['xyz_loc'] += list([[band_index] + list(xy_loc)]
+                                                                                for xy_loc in burn_dict[geom_burn_val]
+                                                                                for band_index in band_order)
 
             if reducer is not None:
                 warned = False
