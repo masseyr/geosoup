@@ -1295,11 +1295,11 @@ class Raster(object):
                         pixel_center: bool (True) default
                                      Used only if the pass_pixel_coords flag is set to true.
                                      Returns the pixel centers of each pixel if set as true
-                                     else returns top left corners
-                        min_pixels: Minimum number of pixels for reducer to calculate a value.
+                                     else returns top left corners if set as false
+                        min_pixels: Minimum number of pixels for reducer to calculate a value. (default: 1)
                                     If the number of pixels are less than this, then an empty list is returned
                         replace: If the pixel values in Raster.array object should be replaced with
-                                 the reduced value? This will only be computed of min_pixels condition is
+                                 the reduced value? This will only be computed if min_pixels condition is
                                  satisfied and will change the Raster array. Use with caution.
                         reducer: Valid keywords: 'mean','median','max',
                                                  'min', 'percentile_xx' where xx is percentile from 1-99
@@ -1346,7 +1346,7 @@ class Raster(object):
         if 'min_pixels' in kwargs:
             min_pixels = kwargs['min_pixels']
         else:
-            min_pixels = None
+            min_pixels = 1
 
         if 'replace' in kwargs:
             replace = kwargs['replace']
@@ -1542,7 +1542,7 @@ class Raster(object):
                 for geom_id, geom_dict in out_geom_extract.items():
                     try:
                         n_pixels = len(geom_dict['values'])
-                        if min_pixels is None:
+                        if min_pixels is None or (not (0 < min_pixels <= n_pixels)):
                             min_pixels = n_pixels
 
                         if n_pixels >= min_pixels:
