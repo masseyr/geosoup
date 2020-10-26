@@ -731,25 +731,31 @@ class Raster(object):
     def get_coords(xy_list,
                    pixel_size,
                    tie_point,
+                   order_as_yx=False,
                    pixel_center=True):
         """
         Method to convert pixel locations to image coords
         :param xy_list: List of tuples [(x1,y1), (x2,y2)....]
         :param pixel_size: tuple of x and y pixel size. The signs of the pixel sizes (+/-) are as in GeoTransform
         :param tie_point: tuple of x an y coordinates of tie point for the xy list
+        :param order_as_yx: If the order of coordinates is [(y1,x1),..] instead of [(x1,y1),..]
         :param pixel_center: If the center of the pixels should be returned instead of the top corners (default: True)
         :return: List of coordinates in tie point coordinate system
         """
+        pixel_xy_list = xy_list.copy()
 
-        if type(xy_list) != list:
-            xy_list = [xy_list]
+        if type(pixel_xy_list) != list:
+            pixel_xy_list = [pixel_xy_list]
+
+        if order_as_yx:
+            pixel_xy_list = list([y, x] for x, y in pixel_xy_list)
 
         add_const = (float(pixel_size[0])/2.0) * pixel_center, \
                     (float(pixel_size[1])/2.0) * pixel_center
 
         return list((float(xy[0]) * float(pixel_size[0]) + tie_point[0] + add_const[0],
                      float(xy[1]) * float(pixel_size[1]) + tie_point[1] + add_const[1])
-                    for xy in xy_list)
+                    for xy in pixel_xy_list)
 
     @staticmethod
     def get_locations(coords_list,
@@ -1383,10 +1389,10 @@ class Raster(object):
         self.make_tile_grid(*tile_size)
 
         if verbose:
-            Opt.cprint('Processing {} tiles: '.format(len(self.tile_grid)))
+            Opt.cprint('Processing {} tiles: '.format(str(self.ntiles)))
 
         # prepare dict struct
-        out_geom_extract = {internal_id: {'values': [], 'coordinates': [], 'xyz_loc': []}
+        out_geom_extract = {internal_id: {'values': [], 'coordinates': [], 'zyx_loc': []}
                             for internal_id, _ in id_geom_list}
 
         geom_id_order = list(internal_id for internal_id, _ in id_geom_list)
@@ -1395,9 +1401,10 @@ class Raster(object):
         for tile_indx, tile in enumerate(self.tile_grid):
 
             if verbose:
-                Opt.cprint('Processing tile {} with dimensions {}x{}'.format(str(tile_indx + 1),
-                                                                             str(tile['block_coords'][3]),
-                                                                             str(tile['block_coords'][2])), ' ')
+                Opt.cprint('Processing tile {} of {} with dimensions {}x{}'.format(str(tile_indx + 1),
+                                                                                   str(self.ntiles),
+                                                                                   str(tile['block_coords'][3]),
+                                                                                   str(tile['block_coords'][2])), ' ')
 
             # create tile geometry from bounds
             tile_geom = ogr.CreateGeometryFromWkt('POLYGON(({}))'.format(', '.join(list(' '.join([str(x), str(y)])
@@ -1507,16 +1514,12 @@ class Raster(object):
                         min_burn_val = min(list(geom_dict.keys()))
                         max_burn_val = max(list(geom_dict.keys()))
 
-                        pixel_xy_loc = np.where((mask_arr >= min_burn_val) & (mask_arr <= max_burn_val))
-                        burn_vals = mask_arr[pixel_xy_loc]
-                        pixel_xy_loc_arr = np.array(list(zip(*pixel_xy_loc)))
+                        pixel_yx_loc = np.where((mask_arr >= min_burn_val) & (mask_arr <= max_burn_val))
+                        burn_vals = mask_arr[pixel_yx_loc]
+                        pixel_yx_loc_arr = np.array(list(zip(*pixel_yx_loc)))
 
-                        burn_dict = {}
-                        for geom_burn_val in range(min_burn_val, max_burn_val + 1):
-                            burn_dict[geom_burn_val] = pixel_xy_loc_arr[np.where(burn_vals == geom_burn_val)].tolist()
-                            temp_loc = np.where(burn_vals == geom_burn_val)
-                            if temp_loc[0].shape[0] > 1:
-                                print(geom_burn_val, temp_loc[0].shape[0])
+                        burn_dict = {burn_val: pixel_yx_loc_arr[np.where(burn_vals == burn_val)].tolist()
+                                     for burn_val in list(set(burn_vals))}
 
                         for geom_burn_val, geom_id in geom_dict.items():
                             # convert chunk geom id to actual/global geom id
@@ -1528,13 +1531,14 @@ class Raster(object):
                                     self.get_coords(burn_dict[geom_burn_val],
                                                     (self.transform[1], self.transform[5]),
                                                     tile['tie_point'],
-                                                    pixel_center)
+                                                    pixel_center=pixel_center,
+                                                    order_as_yx=True)
                             # get band values from tile array
-                            out_geom_extract[actual_geom_id]['values'] += list(tile_arr[band_order, x, y].tolist()
-                                                                               for x, y in burn_dict[geom_burn_val])
+                            out_geom_extract[actual_geom_id]['values'] += list(tile_arr[band_order, y, x].tolist()
+                                                                               for y, x in burn_dict[geom_burn_val])
 
-                            out_geom_extract[actual_geom_id]['xyz_loc'] += list([[band_index] + list(xy_loc)]
-                                                                                for xy_loc in burn_dict[geom_burn_val]
+                            out_geom_extract[actual_geom_id]['zyx_loc'] += list([[band_index] + list(yx_loc)]
+                                                                                for yx_loc in burn_dict[geom_burn_val]
                                                                                 for band_index in band_order)
 
             if reducer is not None:
@@ -1551,9 +1555,9 @@ class Raster(object):
                                                                  axis=0).tolist()
 
                             if replace:
-                                pixel_loc = (np.array(geom_dict['xyz_loc'])[:, 0],
-                                             np.array(geom_dict['xyz_loc'])[:, 1],
-                                             np.array(geom_dict['xyz_loc'])[:, 2])
+                                pixel_loc = (np.array(geom_dict['zyx_loc'])[:, 0],
+                                             np.array(geom_dict['zyx_loc'])[:, 1],
+                                             np.array(geom_dict['zyx_loc'])[:, 2])
 
                                 self.array[pixel_loc] = geom_dict['values']
 
