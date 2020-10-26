@@ -1310,9 +1310,9 @@ class Raster(object):
                         reducer: Valid keywords: 'mean','median','max',
                                                  'min', 'percentile_xx' where xx is percentile from 1-99
 
-        :return: Dictionary of dictionaries
-                {internal_id: {'values': [[band1, ], ], 'coordinates': [(x1, y1), ]}, }
-                if geom_id is supplied then internal_id is the supplied geom_id
+        :return: list of dictionaries
+                [ {'values': [[band1, ], ], 'coordinates': [(x1, y1), ]}, 'zyx_loc': [[band, y, x], ], ]
+                The order is the same as the supplied geometry wkt string list
 
         todo: Implement separation of overlapping feature extractions
 
