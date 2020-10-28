@@ -1525,21 +1525,25 @@ class Raster(object):
                             # convert chunk geom id to actual/global geom id
                             actual_geom_id = chunk_indx_geom_indx_relation[geom_id]
 
-                            if pass_pixel_coords:
-                                # get coordinates
-                                out_geom_extract[actual_geom_id]['coordinates'] += \
-                                    self.get_coords(burn_dict[geom_burn_val],
-                                                    (self.transform[1], self.transform[5]),
-                                                    tile['tie_point'],
-                                                    pixel_center=pixel_center,
-                                                    order_as_yx=True)
-                            # get band values from tile array
-                            out_geom_extract[actual_geom_id]['values'] += list(tile_arr[band_order, y, x].tolist()
-                                                                               for y, x in burn_dict[geom_burn_val])
+                            if geom_burn_val in burn_dict:
 
-                            out_geom_extract[actual_geom_id]['zyx_loc'] += list([[band_index] + list(yx_loc)]
-                                                                                for yx_loc in burn_dict[geom_burn_val]
-                                                                                for band_index in band_order)
+                                if pass_pixel_coords:
+                                    # get coordinates
+                                    out_geom_extract[actual_geom_id]['coordinates'] += \
+                                        self.get_coords(burn_dict[geom_burn_val],
+                                                        (self.transform[1], self.transform[5]),
+                                                        tile['tie_point'],
+                                                        pixel_center=pixel_center,
+                                                        order_as_yx=True)
+                                # get band values from tile array
+                                out_geom_extract[actual_geom_id]['values'] += list(tile_arr[band_order, y, x].tolist()
+                                                                                   for y, x in
+                                                                                   burn_dict[geom_burn_val])
+
+                                out_geom_extract[actual_geom_id]['zyx_loc'] += list([[band_index] + list(yx_loc)]
+                                                                                    for yx_loc in
+                                                                                    burn_dict[geom_burn_val]
+                                                                                    for band_index in band_order)
 
             if reducer is not None:
                 warned = False
