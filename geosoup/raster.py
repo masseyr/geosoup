@@ -378,7 +378,7 @@ class Raster(object):
         """
         Method to read raster array with offsets and a specific band order
         :param offsets: tuple or list - (xoffset, yoffset, xcount, ycount)
-        :param band_order: order of bands to read
+        :param band_order: order of bands to read (index starts at 0)
         :param n_tries: number of tries after read error
         :param nodatavalue: No data value
         """
@@ -1868,6 +1868,10 @@ class MultiRaster:
         self.nodatavalue = list(raster.nodatavalue for raster in self.rasters)
         self.resolutions = list((raster.transform[1], raster.transform[5]) for raster in self.rasters)
 
+    def __repr__(self):
+        return '<Multi-Raster object with {} files and {} rasters>'.format(str(len(self.filelist)),
+                                                                           str(len(self.rasters)))
+
     def get_extent(self,
                    index=None,
                    intersection=True,
@@ -2027,7 +2031,7 @@ class MultiRaster:
         if write_vrt:
             vrtfile = outfile.replace('.tif', '.vrt')
         else:
-            vrtfile = '/vsimem/' + Opt.temp_name()
+            vrtfile = '/vsimem/LS' + Opt.temp_name(extension='.vrt')
 
         _vrt_ = gdal.BuildVRT(vrtfile,
                               list(self.filelist[i] for i in order),
