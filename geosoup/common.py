@@ -7,6 +7,7 @@ import datetime
 import logging
 import socket
 import fnmatch
+import string
 import random
 import psutil
 import shutil
@@ -1462,13 +1463,18 @@ class Opt:
         return copy.deepcopy(obj)
 
     @staticmethod
-    def temp_name():
+    def temp_name(n_char=16,
+                  prefix_letters=2,
+                  extension='.tmp'):
         """
         Generate a temperory name based on current machine time with a .tmp extension
         """
-        return 'T{}'.format(np.random.random().hex()) + \
-               datetime.datetime.now().isoformat().replace(':', '')\
-            .replace('.', '').replace('-', '').replace('T', '') + '.tmp'
+        return ''.join(random.sample(string.ascii_uppercase, prefix_letters)) + \
+            ''.join(random.sample(string.ascii_uppercase +
+                                  datetime.datetime.now().isoformat()
+                                  .replace(':', '').replace('.', '')
+                                  .replace('-', '').replace('T', ''),
+                                  n_char-prefix_letters)) + str(extension)
 
     @staticmethod
     def lists_to_dict(value_list=None,
