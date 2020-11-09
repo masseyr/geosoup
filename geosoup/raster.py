@@ -371,41 +371,36 @@ class Raster(object):
         fileptr = None
 
     def read_array(self,
-                   offsets=None,
                    band_order=None,
+                   offsets=None,
                    n_tries=5,
                    nodatavalue=-9999):
         """
         Method to read raster array with offsets and a specific band order
         :param offsets: tuple or list - (xoffset, yoffset, xcount, ycount)
-        :param band_order: order of bands to read (index starts at 0)
+        :param band_order: list, order of bands to read (index starts at 0)
         :param n_tries: number of tries after read error
         :param nodatavalue: No data value
         """
 
-        if not self.init:
-            self.initialize()
+        self.initialize()
 
         fileptr = self.datasource
 
         nbands, nrows, ncols = self.shape
 
-        if offsets is None:
-            self.array_offsets = (0, 0, ncols, nrows)
-        else:
-            self.array_offsets = offsets
+        self.array_offsets = (0, 0, ncols, nrows) if offsets is None else offsets
 
-        array3d = np.zeros((nbands,
-                            self.array_offsets[3],
-                            self.array_offsets[2]),
-                           gdal_array.GDALTypeCodeToNumericTypeCode(fileptr.GetRasterBand(1).DataType))
-
-        # read array and store the band values and name in array
-        if band_order is not None:
-            for b in band_order:
-                self.bnames.append(self.datasource.GetRasterBand(b + 1).GetDescription())
+        if band_order is None:
+            band_order = list(range(0, nbands))
         else:
-            band_order = list(range(nbands))
+            self.bnames = list(self.bnames[b] for b in band_order)
+            nbands = len(band_order)
+
+        self.shape = nbands, self.array_offsets[3], self.array_offsets[2]
+
+        array3d = np.zeros(self.shape,
+                           dtype=gdal_array.GDALTypeCodeToNumericTypeCode(fileptr.GetRasterBand(1).DataType))
 
         # read array and store the band values and name in array
         for i, b in enumerate(band_order):
@@ -433,7 +428,7 @@ class Raster(object):
                 else:
                     array3d[i, :, :] = nodatavalue
 
-        if (self.shape[0] == 1) and (len(array3d.shape) > 2):
+        if self.shape[0] == 1:
             self.array = array3d.reshape([self.array_offsets[3],
                                           self.array_offsets[2]])
         else:
