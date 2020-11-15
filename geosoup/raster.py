@@ -428,11 +428,7 @@ class Raster(object):
                 else:
                     array3d[i, :, :] = nodatavalue
 
-        if self.shape[0] == 1:
-            self.array = array3d.reshape([self.array_offsets[3],
-                                          self.array_offsets[2]])
-        else:
-            self.array = array3d
+        self.array = array3d
 
     def nodata_mask(self,
                     use_band=0,
@@ -911,8 +907,8 @@ class Raster(object):
                 xmin, xmax, ymin, ymax = bound_coords
             elif coords_type == 'crs':
                 _xmin, _xmax, _ymin, _ymax = bound_coords
-                coords_list = [(_xmin, _ymax), (_xmax, _ymax), (_xmax, _ymin), (_xmin, _ymin)]
-                coords_locations = np.array(self.get_locations(coords_list,
+                vertices = [(_xmin, _ymax), (_xmax, _ymax), (_xmax, _ymin), (_xmin, _ymin)]
+                coords_locations = np.array(self.get_locations(vertices,
                                                                (self.transform[1], self.transform[5]),
                                                                (self.transform[0], self.transform[3])))
                 xmin, xmax, ymin, ymax = \
@@ -1028,7 +1024,7 @@ class Raster(object):
         :return: numpy array
         """
 
-        if edge_buffer is None:
+        if edge_buffer is None or edge_buffer == (None, None):
             edge_buffer_x, edge_buffer_y = 0, 0
         else:
             edge_buffer_x, edge_buffer_y = edge_buffer
