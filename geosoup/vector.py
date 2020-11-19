@@ -398,7 +398,7 @@ class Vector(object):
         :param _return: Type of response to return ('code' or 'name')
         :return: string
         """
-        if type(inp_str).__name__ != 'str':
+        if type(inp_str) != str:
             return Vector.ogr_data_type(inp_str, _return)
         else:
             try:
