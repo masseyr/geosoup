@@ -1,6 +1,5 @@
-## Geosoup v0.1.74
+## Geosoup v0.1.78
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4288226.svg)](https://doi.org/10.5281/zenodo.4288226)
 
 Geosoup is a python package for geospatial data manipulation using `GDAL` and `GDAL bindings` in python.
 
@@ -11,4 +10,4 @@ Install using:
 `pip install geosoup`
 
 
-_Note: Must have_ `GDAL >= 2.1.3` _up and running before installing this package._
+Note: Must have `GDAL >= 2.1.3` up and running before installing this package.
