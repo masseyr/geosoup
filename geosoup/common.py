@@ -703,10 +703,12 @@ class Handler(object):
 
     def add_to_filename(self,
                         string=None,
+                        new_extension=None,
                         timestamp=False):
         """
         Method to append a string to a filename, before the .xxx extension
         :param string: String to append
+        :param new_extension:
         :param timestamp: If timestamp (upto seconds) should be added to a filename, before the .xxx extension
                           This can be used in addition to the string
         :return:
@@ -726,7 +728,10 @@ class Handler(object):
 
         file_name += string
 
-        self.basename = file_name + file_ext
+        if new_extension is not  None:
+            self.basename = file_name + new_extension
+        else:
+            self.basename = file_name + file_ext
 
         if self.dirname is not None:
             return self.dirname + self.sep + self.basename
@@ -1182,6 +1187,7 @@ class Handler(object):
                     for line in f:
                         if counter == 0:
                             colnames = list(elem.strip() for elem in line.split(','))
+                            lines.append(colnames)
                         elif len(line.split(',')) != len(colnames):
                             err_counter += 1
                         else:
@@ -1192,6 +1198,7 @@ class Handler(object):
                     for line in f:
                         if counter == 0:
                             colnames = list(elem.strip() for elem in line.split(','))
+                            lines.append(colnames)
                         elif len(line.split(',')) != len(colnames):
                             err_counter += 1
                         elif counter <= line_limit:
@@ -1222,6 +1229,7 @@ class Handler(object):
                     for il, line in enumerate(f):
                         if counter == 0:
                             colnames = list(elem.strip() for elem in line.split(','))
+                            lines.append(colnames)
                             counter += 1
                         elif len(line.split(',')) != len(colnames):
                             err_counter += 1
